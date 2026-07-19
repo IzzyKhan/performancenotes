@@ -1,65 +1,178 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
+import { Clapperboard, LogOut, Plus, Trash2 } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { EditProjectDialog } from "@/components/project/edit-project-dialog";
+import type { Project } from "@/types";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+export default function HomePage() {
+  const router = useRouter();
+  const { data: session, status } = useSession();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/projects");
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+      const data = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function remove(id: string) {
+    if (!confirm("Delete this project?")) return;
+    await fetch(`/api/projects?id=${id}`, { method: "DELETE" });
+    toast.success("Project deleted");
+    void load();
+  }
+
+  function handleProjectSaved(updated: Project) {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === updated.id ? updated : p))
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-dvh bg-background">
+      <div className="mx-auto max-w-3xl px-6 py-14">
+        <div className="mb-12 flex items-start justify-between gap-4">
+          <div>
+            <div className="mb-4 flex items-center gap-2 text-muted-foreground">
+              <Clapperboard className="size-4 stroke-[1.5]" />
+              <span className="text-xs font-normal tracking-wide">
+                Performance Notes
+              </span>
+            </div>
+            <h1 className="text-[28px] font-medium tracking-tight text-foreground">
+              Direct with playable notes
+            </h1>
+            <p className="mt-2 max-w-md text-sm font-normal leading-relaxed text-muted-foreground">
+              Upload a scene, riff on an instinct canvas, and distill clear
+              objectives and action verbs your actors can use on set.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <ThemeToggle />
+            {status === "authenticated" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-muted-foreground"
+                onClick={() => void signOut({ callbackUrl: "/login" })}
+                title={session?.user?.email ?? "Sign out"}
+              >
+                <LogOut className="size-3.5" />
+                <span className="hidden sm:inline">Sign out</span>
+              </Button>
+            ) : status === "unauthenticated" ? (
+              <Link
+                href="/login"
+                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              >
+                Sign in
+              </Link>
+            ) : null}
+            <Link
+              href="/projects/new"
+              className={cn(buttonVariants(), "gap-1.5")}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <Plus className="size-3.5 stroke-[1.5]" />
+              New project
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-normal text-muted-foreground">Projects</p>
         </div>
-      </main>
+
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading projects…</p>
+        ) : projects.length === 0 ? (
+          <Card className="border-dashed bg-transparent">
+            <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+              <p className="max-w-sm text-sm text-muted-foreground">
+                No projects yet. Create one to get started — a demo scene will
+                also appear when you sign up.
+              </p>
+              <Link href="/projects/new" className={buttonVariants()}>
+                Create your first project
+              </Link>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {projects.map((p) => (
+              <Card
+                key={p.id}
+                className="group bg-transparent transition-colors hover:bg-accent/40"
+              >
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3.5">
+                  <div className="min-w-0">
+                    <CardTitle className="truncate text-sm font-medium">
+                      <Link
+                        href={`/projects/${p.id}`}
+                        className="hover:text-foreground"
+                      >
+                        {p.title}
+                      </Link>
+                    </CardTitle>
+                    <p
+                      className="mt-0.5 text-xs text-muted-foreground"
+                      suppressHydrationWarning
+                    >
+                      {new Date(p.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <EditProjectDialog
+                      project={p}
+                      onSaved={handleProjectSaved}
+                    />
+                    <Link
+                      href={`/projects/${p.id}`}
+                      className={buttonVariants({
+                        size: "sm",
+                        variant: "outline",
+                      })}
+                    >
+                      Open
+                    </Link>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"
+                      onClick={() => remove(p.id)}
+                    >
+                      <Trash2 className="size-3.5 stroke-[1.5]" />
+                    </Button>
+                  </div>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

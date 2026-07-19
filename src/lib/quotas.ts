@@ -1,0 +1,81 @@
+/**
+ * Per-user Claude usage quotas (Phase 4 scaffolding).
+ * Enforced when AUTH_SECRET is set. Limits by plan:
+ *   prep (default): 50 chat/distill calls per calendar month
+ *   dramaturg: 500
+ * Override with CHAT_QUOTA_PREP / CHAT_QUOTA_DRAMATURG.
+ */
+
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { nowIso } from "@/lib/id";
+import { authRequired } from "@/lib/auth-guard";
+
+function monthKey(d = new Date()): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function quotaForPlan(plan: string | null | undefined): number {
+  if (plan === "dramaturg") {
+    return Number(process.env.CHAT_QUOTA_DRAMATURG || 500);
+  }
+  return Number(process.env.CHAT_QUOTA_PREP || 50);
+}
+
+export type QuotaResult =
+  | { ok: true }
+  | { ok: false; error: string; limit: number; used: number };
+
+export function checkAndIncrementChatQuota(userId: string): QuotaResult {
+  if (!authRequired() || userId === "local") return { ok: true };
+
+  const row = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!row) return { ok: false, error: "User not found", limit: 0, used: 0 };
+
+  const currentMonth = monthKey();
+  let used = row.chatUsageCount ?? 0;
+  if (row.chatUsageResetAt !== currentMonth) {
+    used = 0;
+  }
+
+  const limit = quotaForPlan(row.plan);
+  if (used >= limit) {
+    return {
+      ok: false,
+      error: `Monthly AI quota reached (${limit}). Upgrade plan or wait until next month.`,
+      limit,
+      used,
+    };
+  }
+
+  db.update(users)
+    .set({
+      chatUsageCount: used + 1,
+      chatUsageResetAt: currentMonth,
+    })
+    .where(eq(users.id, userId))
+    .run();
+
+  return { ok: true };
+}
+
+/** Apply plan entitlement after Stripe webhook (Phase 4). */
+export function setUserPlan(
+  userId: string,
+  plan: "prep" | "dramaturg" | null,
+  stripeCustomerId?: string
+) {
+  db.update(users)
+    .set({
+      plan,
+      ...(stripeCustomerId ? { stripeCustomerId } : {}),
+    })
+    .where(eq(users.id, userId))
+    .run();
+}
+
+export function touchUserUpdated(_userId: string) {
+  // placeholder for future audit fields
+  void nowIso;
+}

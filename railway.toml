@@ -1,0 +1,23 @@
+# Railway deployment (Phase 1 pilot)
+#
+# Dashboard (required):
+# 1. New project → Deploy from GitHub repo
+# 2. Variables: ANTHROPIC_API_KEY, BASIC_AUTH_USER, BASIC_AUTH_PASSWORD
+# 3. Volume → Mount path: /app/data  (persists SQLite + uploads)
+# 4. Networking → Generate domain
+# 5. Health check path (optional): /api/health
+#
+# The volume mount must match process.cwd()/data. On Railway Nixpacks,
+# the app root is typically /app, so mount at /app/data.
+#
+# Native module build deps are in nixpacks.toml (python3, gcc, gnumake).
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "sh -c 'npx next start -H 0.0.0.0 -p ${PORT:-3000}'"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

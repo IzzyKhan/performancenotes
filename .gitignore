@@ -32,6 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local app data
+/data/*.db
+/data/*.db-*
+/data/uploads/*
+/data/mock-exports/
+!/data/uploads/.gitkeep
+!/data/.gitkeep
 
 # vercel
 .vercel
