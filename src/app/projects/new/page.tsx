@@ -106,6 +106,10 @@ export default function NewProjectPage() {
       });
       const project = await readJson(res);
       if (!res.ok) throw new Error(project.error || "Failed to create project");
+      if (typeof project.id !== "string") {
+        throw new Error("Create project did not return an id");
+      }
+      const projectId = project.id;
 
       if (kind === "series") {
         for (let i = 0; i < ready.length; i++) {
@@ -120,7 +124,7 @@ export default function NewProjectPage() {
 
           if (d.mode === "pdf" && d.file) {
             const form = new FormData();
-            form.append("projectId", project.id);
+            form.append("projectId", projectId);
             form.append("title", scriptTitle);
             form.append("episodeNumber", String(epNum));
             form.append("file", d.file);
@@ -140,7 +144,7 @@ export default function NewProjectPage() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                projectId: project.id,
+                projectId,
                 title: scriptTitle,
                 episodeNumber: epNum,
                 rawText: d.text.trim(),
@@ -155,7 +159,7 @@ export default function NewProjectPage() {
         }
       }
 
-      router.push(`/projects/${project.id}`);
+      router.push(`/projects/${projectId}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create project");
       setLoading(false);
