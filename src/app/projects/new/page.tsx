@@ -127,7 +127,12 @@ export default function NewProjectPage() {
             form.append("projectId", projectId);
             form.append("title", scriptTitle);
             form.append("episodeNumber", String(epNum));
-            form.append("file", d.file);
+            form.append(
+              "file",
+              new File([d.file], d.file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"), {
+                type: d.file.type || "application/pdf",
+              })
+            );
             const scriptRes = await fetch("/api/scripts", {
               method: "POST",
               body: form,

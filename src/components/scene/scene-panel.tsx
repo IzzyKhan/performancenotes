@@ -142,9 +142,17 @@ export function ScenePanel({
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("title", file.name.replace(/\.pdf$/i, ""));
-        form.append("file", file);
+        form.append(
+          "file",
+          new File(
+            [file],
+            file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"),
+            { type: file.type || "application/pdf" }
+          )
+        );
         const res = await fetch("/api/scripts", { method: "POST", body: form });
-        const data = await res.json();
+        const raw = await res.text();
+        const data = raw ? JSON.parse(raw) : {};
         if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
         onScriptsChange([...scripts, data.script]);
         onScenesChange([...scenes, ...data.scenes]);
@@ -159,9 +167,17 @@ export function ScenePanel({
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("scriptId", activeScriptId);
-        form.append("file", file);
+        form.append(
+          "file",
+          new File(
+            [file],
+            file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"),
+            { type: file.type || "application/pdf" }
+          )
+        );
         const res = await fetch("/api/scenes", { method: "POST", body: form });
-        const data = await res.json();
+        const raw = await res.text();
+        const data = raw ? JSON.parse(raw) : {};
         if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
         mergeScriptScenes(activeScriptId, data);
         if (data[0]) onActiveSceneChange(data[0].id);

@@ -4,6 +4,7 @@ import { extractPdfTextWithLines } from "@/lib/pdf";
 import { db } from "@/db";
 import { scenes, scripts } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
+import { parseMultipartForm } from "@/lib/multipart";
 import { mapScene } from "@/lib/mappers";
 import { parseScreenplayText } from "@/lib/screenplay";
 import {
@@ -41,7 +42,9 @@ export async function POST(request: Request) {
   let sourceType: "pdf" | "typed";
 
   if (contentType.includes("multipart/form-data")) {
-    const form = await request.formData();
+    const formOrErr = await parseMultipartForm(request);
+    if (formOrErr instanceof NextResponse) return formOrErr;
+    const form = formOrErr;
     projectId = String(form.get("projectId") || "");
     scriptId = String(form.get("scriptId") || "") || null;
     title = String(form.get("title") || "").trim();

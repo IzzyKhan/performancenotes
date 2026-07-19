@@ -3,6 +3,7 @@ import path from "path";
 import convert from "heic-convert";
 import { requireUser } from "@/lib/auth-guard";
 import { createId } from "@/lib/id";
+import { parseMultipartForm } from "@/lib/multipart";
 import { putUploadObject } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -38,7 +39,9 @@ export async function POST(request: Request) {
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 
-  const form = await request.formData();
+  const formOrErr = await parseMultipartForm(request);
+  if (formOrErr instanceof NextResponse) return formOrErr;
+  const form = formOrErr;
   const file = form.get("file");
 
   if (!(file instanceof File)) {
