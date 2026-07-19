@@ -34,6 +34,25 @@ function emptyDraft(index: number): ScriptDraft {
   };
 }
 
+async function readJson(res: Response): Promise<Record<string, unknown> & { id?: string; error?: string }> {
+  const text = await res.text();
+  if (!text) {
+    throw new Error(
+      `Server returned an empty response (HTTP ${res.status}). Check Railway logs — often a crash parsing a large PDF or a missing AUTH_SECRET.`
+    );
+  }
+  try {
+    return JSON.parse(text) as Record<string, unknown> & {
+      id?: string;
+      error?: string;
+    };
+  } catch {
+    throw new Error(
+      `Server returned a non-JSON response (HTTP ${res.status}). Check Railway deploy logs.`
+    );
+  }
+}
+
 export default function NewProjectPage() {
   const router = useRouter();
   const [kind, setKind] = useState<ProjectKind | null>(null);
@@ -85,8 +104,8 @@ export default function NewProjectPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim() }),
       });
-      const project = await res.json();
-      if (!res.ok) throw new Error(project.error || "Failed");
+      const project = await readJson(res);
+      if (!res.ok) throw new Error(project.error || "Failed to create project");
 
       if (kind === "series") {
         for (let i = 0; i < ready.length; i++) {
@@ -109,9 +128,12 @@ export default function NewProjectPage() {
               method: "POST",
               body: form,
             });
-            const scriptData = await scriptRes.json();
+            const scriptData = await readJson(scriptRes);
             if (!scriptRes.ok) {
-              throw new Error(scriptData.error || "PDF parse failed");
+              throw new Error(
+                scriptData.error ||
+                  `PDF parse failed for ${scriptTitle} (HTTP ${scriptRes.status})`
+              );
             }
           } else {
             const scriptRes = await fetch("/api/scripts", {
@@ -125,7 +147,7 @@ export default function NewProjectPage() {
                 sourceType: "typed",
               }),
             });
-            const scriptData = await scriptRes.json();
+            const scriptData = await readJson(scriptRes);
             if (!scriptRes.ok) {
               throw new Error(scriptData.error || "Failed to add script");
             }

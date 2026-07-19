@@ -15,6 +15,13 @@ declare module "next-auth" {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Production (Railway) crashes some routes if secret is missing — fall back so
+  // Basic Auth–only pilots still work. Set AUTH_SECRET for real account sessions.
+  secret:
+    process.env.AUTH_SECRET ||
+    (process.env.NODE_ENV === "production"
+      ? "performancenotes-set-AUTH_SECRET-in-railway"
+      : "dev-secret"),
   providers: [
     Credentials({
       credentials: {
