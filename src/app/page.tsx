@@ -78,7 +78,12 @@ export default function HomePage() {
                 variant="ghost"
                 size="sm"
                 className="gap-1.5 text-muted-foreground"
-                onClick={() => void signOut({ callbackUrl: "/login" })}
+                onClick={() => {
+                  void signOut({ redirect: false }).then(() => {
+                    // Avoid Auth.js absolute redirect (Railway host can be 0.0.0.0).
+                    window.location.assign("/login");
+                  });
+                }}
                 title={session?.user?.email ?? "Sign out"}
               >
                 <LogOut className="size-3.5" />
