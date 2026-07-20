@@ -1,35 +1,69 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Loader2, Send, Sparkles } from "lucide-react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import { Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ChatMessage, CheatSheet } from "@/types";
 import { cn } from "@/lib/utils";
 
-export function AgentChat({
-  projectId,
-  sceneId,
-  sceneHeading,
-  initialMessages,
-  onCheatSheet,
-}: {
-  projectId: string;
-  sceneId: string | null;
-  sceneHeading: string | null;
-  initialMessages: ChatMessage[];
-  onCheatSheet?: (sheet: CheatSheet) => void;
-}) {
+export type AgentChatHandle = {
+  distill: () => void;
+};
+
+export const AgentChat = forwardRef<
+  AgentChatHandle,
+  {
+    projectId: string;
+    sceneId: string | null;
+    sceneHeading: string | null;
+    initialMessages: ChatMessage[];
+    onCheatSheet?: (sheet: CheatSheet) => void;
+    onStreamingChange?: (streaming: boolean) => void;
+  }
+>(function AgentChat(
+  {
+    projectId,
+    sceneId,
+    sceneHeading,
+    initialMessages,
+    onCheatSheet,
+    onStreamingChange,
+  },
+  ref
+) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [waitStatus, setWaitStatus] = useState<"preparing" | "thinking" | null>(
+    null
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamText]);
+  }, [messages, streamText, waitStatus]);
+
+  // Fallback if the server is slow to open the stream
+  useEffect(() => {
+    if (!streaming || waitStatus !== "preparing") return;
+    const timer = window.setTimeout(() => {
+      setWaitStatus((s) => (s === "preparing" ? "thinking" : s));
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [streaming, waitStatus]);
+
+  useEffect(() => {
+    onStreamingChange?.(streaming);
+  }, [streaming, onStreamingChange]);
 
   // Refresh history for this scene on mount (initialMessages come from the
   // page bundle and can be stale after switching scenes mid-session)
@@ -69,6 +103,7 @@ export function AgentChat({
     setInput("");
     setStreaming(true);
     setStreamText("");
+    setWaitStatus("preparing");
 
     try {
       const res = await fetch("/api/chat", {
@@ -117,9 +152,14 @@ export function AgentChat({
           if (!data) continue;
           try {
             const parsed = JSON.parse(data);
-            if (event === "token") {
+            if (event === "status") {
+              if (parsed.phase === "preparing" || parsed.phase === "thinking") {
+                setWaitStatus(parsed.phase);
+              }
+            } else if (event === "token") {
               assembled += parsed.text;
               setStreamText(assembled);
+              setWaitStatus(null);
             } else if (event === "cheatsheet") {
               onCheatSheet?.(parsed as CheatSheet);
             } else if (event === "done") {
@@ -146,30 +186,24 @@ export function AgentChat({
       }
     } finally {
       setStreaming(false);
+      setWaitStatus(null);
     }
   }
 
+  useImperativeHandle(ref, () => ({
+    distill: () => {
+      void send("distill");
+    },
+  }));
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">Agent</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {sceneHeading
-              ? `Dramaturg · working on ${sceneHeading}`
-              : "Dramaturg · sees scene + canvas"}
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="gap-1.5"
-          disabled={streaming}
-          onClick={() => send("distill")}
-        >
-          <Sparkles className="size-3.5" />
-          Distill cheat sheet
-        </Button>
+      <div className="shrink-0 border-b border-border px-3 py-2">
+        <p className="truncate text-[11px] text-muted-foreground">
+          {sceneHeading
+            ? `Dramaturg · working on ${sceneHeading}`
+            : "Dramaturg · sees scene + canvas"}
+        </p>
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-3 py-3">
@@ -193,6 +227,16 @@ export function AgentChat({
               {m.content}
             </div>
           ))}
+          {streaming && !streamText && waitStatus ? (
+            <div className="mr-4 flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 shrink-0 animate-spin" />
+              <span>
+                {waitStatus === "preparing"
+                  ? "Reading scene & canvas…"
+                  : "Thinking…"}
+              </span>
+            </div>
+          ) : null}
           {streamText ? (
             <div className="mr-4 rounded-md border border-border bg-transparent px-3 py-2 text-sm whitespace-pre-wrap">
               {streamText}
@@ -234,4 +278,4 @@ export function AgentChat({
       </div>
     </div>
   );
-}
+});

@@ -582,8 +582,7 @@ export function ShootScheduleDialog({
         <DialogHeader className="border-b border-border px-4 py-3">
           <DialogTitle>Shoot schedule</DialogTitle>
           <DialogDescription>
-            Unscheduled stays pinned on the left while shoot days scroll. Drag
-            scenes onto days across all episodes.
+            Drag and drop scenes onto days to align with your production schedule.
           </DialogDescription>
         </DialogHeader>
 

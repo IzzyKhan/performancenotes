@@ -9,11 +9,12 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  Sparkles,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { InstinctCanvas } from "@/components/canvas/instinct-canvas";
-import { AgentChat } from "@/components/chat/agent-chat";
+import { AgentChat, type AgentChatHandle } from "@/components/chat/agent-chat";
 import { CheatSheetPanel } from "@/components/cheatsheet/cheat-sheet-panel";
 import { ScenePanel } from "@/components/scene/scene-panel";
 import { ShootScheduleDialog } from "@/components/schedule/shoot-schedule-dialog";
@@ -46,6 +47,8 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightWidth, setRightWidth] = useState(380);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const agentChatRef = useRef<AgentChatHandle>(null);
+  const [agentStreaming, setAgentStreaming] = useState(false);
 
   // Re-sync scripts/scenes (incl. shoot schedule) from the API on mount and
   // whenever the tab becomes visible again, so App Router / browser cache
@@ -328,18 +331,36 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               onValueChange={(v) => setRightTab(v as "agent" | "sheet")}
               className="flex h-full min-h-0 flex-col gap-0 overflow-hidden"
             >
-              <TabsList className="mx-3 mt-2 w-auto shrink-0 self-start print:hidden">
-                <TabsTrigger value="agent">Agent</TabsTrigger>
-                <TabsTrigger value="sheet">Cheat sheet</TabsTrigger>
-              </TabsList>
+              <div className="mx-3 mt-2 flex shrink-0 items-center justify-between gap-2 print:hidden">
+                <TabsList className="w-auto shrink-0">
+                  <TabsTrigger value="agent">Agent</TabsTrigger>
+                  <TabsTrigger value="sheet">Cheat sheet</TabsTrigger>
+                </TabsList>
+                {rightTab === "agent" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0 gap-1.5"
+                    disabled={agentStreaming}
+                    onClick={() => agentChatRef.current?.distill()}
+                  >
+                    <Sparkles className="size-3.5" />
+                    <span className="hidden sm:inline">Distill cheat sheet</span>
+                    <span className="sm:hidden">Distill</span>
+                  </Button>
+                ) : null}
+              </div>
               <TabsContent
                 value="agent"
                 className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden print:hidden"
               >
                 <AgentChat
+                  ref={agentChatRef}
                   key={activeSceneId ?? "project"}
                   projectId={bundle.project.id}
                   sceneId={activeSceneId}
+                  onStreamingChange={setAgentStreaming}
                   sceneHeading={
                     activeScene
                       ? sceneSlugLabel(

@@ -166,125 +166,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const access = await requireProjectAccess(projectId);
-  if ("error" in access) return access.error;
-  const { project, user } = access;
-
-  const { checkAndIncrementChatQuota } = await import("@/lib/quotas");
-  const quota = checkAndIncrementChatQuota(user.id);
-  if (!quota.ok) {
-    return NextResponse.json({ error: quota.error }, { status: 429 });
-  }
-
-  const projectScripts = listScriptsForProject(projectId);
-  const allScenes = listScenesForProject(projectId);
-
-  // Active scene: the one requested, else the first in script order
-  const scene =
-    (sceneId ? allScenes.find((s) => s.id === sceneId) : undefined) ??
-    allScenes[0] ??
-    null;
-  const activeSceneId = scene?.id ?? null;
-
-  // Scene-scoped canvas nodes and chat history; null-sceneId rows are
-  // legacy/project-wide and stay visible everywhere
-  const nodeRows = db
-    .select()
-    .from(canvasNodes)
-    .where(eq(canvasNodes.projectId, projectId))
-    .all()
-    .map(mapCanvasNode)
-    .filter((n) => n.sceneId === null || n.sceneId === activeSceneId);
-  const history = db
-    .select()
-    .from(chatMessages)
-    .where(eq(chatMessages.projectId, projectId))
-    .all()
-    .filter((m) => m.sceneId === null || m.sceneId === activeSceneId);
-  const cheatRow = db
-    .select()
-    .from(cheatSheets)
-    .where(
-      activeSceneId
-        ? and(
-            eq(cheatSheets.projectId, projectId),
-            eq(cheatSheets.sceneId, activeSceneId)
-          )
-        : and(eq(cheatSheets.projectId, projectId), isNull(cheatSheets.sceneId))
-    )
-    .get();
-
-  const cheatSheet = cheatRow ? mapCheatSheet(cheatRow) : null;
-
-  const userText =
-    mode === "distill"
-      ? message?.trim() ||
-        "Please distill everything into a performance cheat sheet now."
-      : message.trim();
-
-  // Persist user message
-  const userMsgId = createId("msg");
-  db.insert(chatMessages)
-    .values({
-      id: userMsgId,
-      projectId,
-      sceneId: activeSceneId,
-      role: "user",
-      content: mode === "distill" ? `[Distill] ${userText}` : userText,
-      createdAt: nowIso(),
-    })
-    .run();
-
-  const contextPreamble = buildContextPreamble(
-    project.title,
-    scene,
-    allScenes,
-    projectScripts,
-    nodeRows,
-    cheatSheet
-  );
-
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  const imageBlocks: Anthropic.ImageBlockParam[] = [];
-  for (const node of getImageNodes(nodeRows).slice(0, 6)) {
-    const img = readImageAsBase64(node.content.filePath!);
-    if (img) {
-      imageBlocks.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: img.mediaType,
-          data: img.data,
-        },
-      });
-    }
-  }
-
-  type Msg = Anthropic.MessageParam;
-  const messages: Msg[] = [];
-
-  // Fold history (skip the message we just inserted — we'll add it with images)
-  for (const m of history) {
-    messages.push({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    });
-  }
-
-  const userContent: Anthropic.ContentBlockParam[] = [
-    ...imageBlocks,
-    {
-      type: "text",
-      text:
-        mode === "distill"
-          ? `${DISTILL_INSTRUCTIONS}\n\nDirector request: ${userText}`
-          : userText,
-    },
-  ];
-
-  messages.push({ role: "user", content: userContent });
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -296,6 +177,134 @@ export async function POST(request: Request) {
       };
 
       try {
+        send("status", { phase: "preparing" });
+
+        const access = await requireProjectAccess(projectId);
+        if ("error" in access) {
+          const errBody = await access.error.json().catch(() => ({
+            error: "Access denied",
+          }));
+          send("error", { error: errBody.error || "Access denied" });
+          return;
+        }
+        const { project, user } = access;
+
+        const { checkAndIncrementChatQuota } = await import("@/lib/quotas");
+        const quota = checkAndIncrementChatQuota(user.id);
+        if (!quota.ok) {
+          send("error", { error: quota.error });
+          return;
+        }
+
+        const projectScripts = listScriptsForProject(projectId);
+        const allScenes = listScenesForProject(projectId);
+
+        const scene =
+          (sceneId ? allScenes.find((s) => s.id === sceneId) : undefined) ??
+          allScenes[0] ??
+          null;
+        const activeSceneId = scene?.id ?? null;
+
+        const nodeRows = db
+          .select()
+          .from(canvasNodes)
+          .where(eq(canvasNodes.projectId, projectId))
+          .all()
+          .map(mapCanvasNode)
+          .filter((n) => n.sceneId === null || n.sceneId === activeSceneId);
+        const history = db
+          .select()
+          .from(chatMessages)
+          .where(eq(chatMessages.projectId, projectId))
+          .all()
+          .filter((m) => m.sceneId === null || m.sceneId === activeSceneId);
+        const cheatRow = db
+          .select()
+          .from(cheatSheets)
+          .where(
+            activeSceneId
+              ? and(
+                  eq(cheatSheets.projectId, projectId),
+                  eq(cheatSheets.sceneId, activeSceneId)
+                )
+              : and(
+                  eq(cheatSheets.projectId, projectId),
+                  isNull(cheatSheets.sceneId)
+                )
+          )
+          .get();
+
+        const cheatSheet = cheatRow ? mapCheatSheet(cheatRow) : null;
+
+        const userText =
+          mode === "distill"
+            ? message?.trim() ||
+              "Please distill everything into a performance cheat sheet now."
+            : message.trim();
+
+        const userMsgId = createId("msg");
+        db.insert(chatMessages)
+          .values({
+            id: userMsgId,
+            projectId,
+            sceneId: activeSceneId,
+            role: "user",
+            content: mode === "distill" ? `[Distill] ${userText}` : userText,
+            createdAt: nowIso(),
+          })
+          .run();
+
+        const contextPreamble = buildContextPreamble(
+          project.title,
+          scene,
+          allScenes,
+          projectScripts,
+          nodeRows,
+          cheatSheet
+        );
+
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+        const imageBlocks: Anthropic.ImageBlockParam[] = [];
+        for (const node of getImageNodes(nodeRows).slice(0, 6)) {
+          const img = readImageAsBase64(node.content.filePath!);
+          if (img) {
+            imageBlocks.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: img.mediaType,
+                data: img.data,
+              },
+            });
+          }
+        }
+
+        type Msg = Anthropic.MessageParam;
+        const messages: Msg[] = [];
+
+        for (const m of history) {
+          messages.push({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          });
+        }
+
+        const userContent: Anthropic.ContentBlockParam[] = [
+          ...imageBlocks,
+          {
+            type: "text",
+            text:
+              mode === "distill"
+                ? `${DISTILL_INSTRUCTIONS}\n\nDirector request: ${userText}`
+                : userText,
+          },
+        ];
+
+        messages.push({ role: "user", content: userContent });
+
+        send("status", { phase: "thinking" });
+
         let fullText = "";
         let cheatSheetSaved: CheatSheetContent | null = null;
 
@@ -327,7 +336,6 @@ export async function POST(request: Request) {
 
         const final = await response.finalMessage();
 
-        // Handle tool use for distill
         for (const block of final.content) {
           if (block.type === "tool_use" && block.name === "save_cheat_sheet") {
             cheatSheetSaved = block.input as CheatSheetContent;
