@@ -349,7 +349,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
                   ? "Collapse scene panel to minimum width"
                   : "Expand scene panel to maximum width"
               }
-              className="absolute top-1/2 left-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover:opacity-100"
+              className="absolute top-1/2 left-1/2 z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-all hover:border-foreground/25 hover:bg-accent hover:text-foreground group-hover:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 togglePanelWidth("left");
@@ -357,9 +357,9 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               onPointerDown={(e) => e.stopPropagation()}
             >
               {leftAtMax ? (
-                <ChevronLeft className="size-3.5" />
+                <ChevronLeft className="size-5" />
               ) : (
-                <ChevronRight className="size-3.5" />
+                <ChevronRight className="size-5" />
               )}
             </button>
           </div>
@@ -405,7 +405,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
                   ? "Collapse agent panel to minimum width"
                   : "Expand agent panel to maximum width"
               }
-              className="absolute top-1/2 left-1/2 z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover:opacity-100"
+              className="absolute top-1/2 left-1/2 z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-all hover:border-foreground/25 hover:bg-accent hover:text-foreground group-hover:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 togglePanelWidth("right");
