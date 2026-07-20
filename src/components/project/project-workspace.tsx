@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Clapperboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -46,6 +48,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   const [rightOpen, setRightOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightWidth, setRightWidth] = useState(380);
+  const [layoutWidth, setLayoutWidth] = useState(0);
   const layoutRef = useRef<HTMLDivElement>(null);
   const agentChatRef = useRef<AgentChatHandle>(null);
   const [agentStreaming, setAgentStreaming] = useState(false);
@@ -143,28 +146,56 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
     if (scene) setActiveScriptId(scene.scriptId);
   }
 
-  const clampPanelWidth = useCallback((width: number, side: "left" | "right") => {
-    const containerWidth = layoutRef.current?.clientWidth ?? 0;
-    const min = side === "left" ? LEFT_PANEL_MIN : RIGHT_PANEL_MIN;
-    const max = containerWidth
-      ? Math.max(min, Math.floor(containerWidth * PANEL_MAX_RATIO))
-      : width;
-    return Math.min(Math.max(width, min), max);
-  }, []);
+  const maxPanelWidth = useCallback(
+    (side: "left" | "right", containerWidth = layoutWidth) => {
+      const min = side === "left" ? LEFT_PANEL_MIN : RIGHT_PANEL_MIN;
+      return containerWidth
+        ? Math.max(min, Math.floor(containerWidth * PANEL_MAX_RATIO))
+        : min;
+    },
+    [layoutWidth]
+  );
+
+  const clampPanelWidth = useCallback(
+    (width: number, side: "left" | "right", containerWidth = layoutWidth) => {
+      const min = side === "left" ? LEFT_PANEL_MIN : RIGHT_PANEL_MIN;
+      return Math.min(
+        Math.max(width, min),
+        maxPanelWidth(side, containerWidth)
+      );
+    },
+    [layoutWidth, maxPanelWidth]
+  );
+
+  const togglePanelWidth = useCallback(
+    (side: "left" | "right") => {
+      const min = side === "left" ? LEFT_PANEL_MIN : RIGHT_PANEL_MIN;
+      const max = maxPanelWidth(side);
+      if (side === "left") {
+        setLeftWidth((current) => (current >= max - 1 ? min : max));
+      } else {
+        setRightWidth((current) => (current >= max - 1 ? min : max));
+      }
+    },
+    [maxPanelWidth]
+  );
 
   const startResize = useCallback(
     (side: "left" | "right") => (event: React.PointerEvent<HTMLDivElement>) => {
       if (!layoutRef.current) return;
+      // Don't start a drag when clicking the expand control
+      if ((event.target as HTMLElement).closest("[data-expand-panel]")) return;
+
       const container = layoutRef.current.getBoundingClientRect();
 
       event.preventDefault();
       const onMove = (moveEvent: PointerEvent) => {
         if (side === "left") {
           const next = moveEvent.clientX - container.left;
-          setLeftWidth(clampPanelWidth(next, "left"));
+          setLeftWidth(clampPanelWidth(next, "left", container.width));
         } else {
           const next = container.right - moveEvent.clientX;
-          setRightWidth(clampPanelWidth(next, "right"));
+          setRightWidth(clampPanelWidth(next, "right", container.width));
         }
       };
 
@@ -180,14 +211,38 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   );
 
   useEffect(() => {
-    const onResize = () => {
-      setLeftWidth((current) => clampPanelWidth(current, "left"));
-      setRightWidth((current) => clampPanelWidth(current, "right"));
+    const el = layoutRef.current;
+    if (!el) return;
+
+    const sync = () => {
+      const width = el.clientWidth;
+      setLayoutWidth(width);
+      const leftMax = Math.max(
+        LEFT_PANEL_MIN,
+        Math.floor(width * PANEL_MAX_RATIO)
+      );
+      const rightMax = Math.max(
+        RIGHT_PANEL_MIN,
+        Math.floor(width * PANEL_MAX_RATIO)
+      );
+      setLeftWidth((current) =>
+        Math.min(Math.max(current, LEFT_PANEL_MIN), leftMax)
+      );
+      setRightWidth((current) =>
+        Math.min(Math.max(current, RIGHT_PANEL_MIN), rightMax)
+      );
     };
 
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [clampPanelWidth]);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const leftAtMax =
+    layoutWidth > 0 && leftWidth >= maxPanelWidth("left") - 1;
+  const rightAtMax =
+    layoutWidth > 0 && rightWidth >= maxPanelWidth("right") - 1;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
@@ -283,6 +338,30 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             onPointerDown={startResize("left")}
           >
             <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-foreground/40 group-active:bg-foreground/50" />
+            <button
+              type="button"
+              data-expand-panel
+              title={
+                leftAtMax ? "Collapse scene panel" : "Expand scene panel"
+              }
+              aria-label={
+                leftAtMax
+                  ? "Collapse scene panel to minimum width"
+                  : "Expand scene panel to maximum width"
+              }
+              className="absolute top-1/2 left-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePanelWidth("left");
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {leftAtMax ? (
+                <ChevronLeft className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+            </button>
           </div>
         ) : null}
 
@@ -315,6 +394,30 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             onPointerDown={startResize("right")}
           >
             <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-foreground/40 group-active:bg-foreground/50" />
+            <button
+              type="button"
+              data-expand-panel
+              title={
+                rightAtMax ? "Collapse agent panel" : "Expand agent panel"
+              }
+              aria-label={
+                rightAtMax
+                  ? "Collapse agent panel to minimum width"
+                  : "Expand agent panel to maximum width"
+              }
+              className="absolute top-1/2 left-1/2 z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePanelWidth("right");
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {rightAtMax ? (
+                <ChevronRight className="size-5" />
+              ) : (
+                <ChevronLeft className="size-5" />
+              )}
+            </button>
           </div>
         ) : null}
 

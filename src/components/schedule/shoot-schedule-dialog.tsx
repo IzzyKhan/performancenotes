@@ -580,7 +580,7 @@ export function ShootScheduleDialog({
         showCloseButton
       >
         <DialogHeader className="border-b border-border px-4 py-3">
-          <DialogTitle>Shoot schedule</DialogTitle>
+          <DialogTitle>Production schedule</DialogTitle>
           <DialogDescription>
             Drag and drop scenes onto days to align with your production schedule.
           </DialogDescription>
