@@ -123,7 +123,10 @@ export async function POST(request: Request) {
       `[api/scripts POST] Saved ${title}: ${result.sceneCount} scenes, ${Date.now() - saveStarted}ms`
     );
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, {
+      status: 201,
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to add script";
     console.error("[api/scripts POST]", err);
