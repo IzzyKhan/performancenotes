@@ -8,6 +8,8 @@ import {
 } from "@/lib/scripts";
 
 export const runtime = "nodejs";
+/** Large shooting-script PDFs can take a while to parse on Railway. */
+export const maxDuration = 120;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -55,6 +57,7 @@ export async function POST(request: Request) {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
+      const started = Date.now();
       try {
         rawText = await extractPdfTextWithLines(new Uint8Array(buffer));
       } catch (err) {
@@ -71,6 +74,9 @@ export async function POST(request: Request) {
       if (!title) {
         title = file.name.replace(/\.pdf$/i, "").trim() || "Episode";
       }
+      console.info(
+        `[api/scripts POST] PDF extracted ${title}: ${(buffer.length / 1024 / 1024).toFixed(1)}MB, ${Date.now() - started}ms`
+      );
 
       if (!rawText) {
         return NextResponse.json(

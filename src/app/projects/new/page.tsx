@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { fileWithSafeName } from "@/lib/multipart";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type ProjectKind = "single" | "series";
@@ -50,6 +51,60 @@ async function readJson(res: Response): Promise<Record<string, unknown> & { id?:
     throw new Error(
       `Server returned a non-JSON response (HTTP ${res.status}). Check Railway deploy logs.`
     );
+  }
+}
+
+function networkErrorMessage(label: string, file?: File | null): string {
+  const size =
+    file && file.size > 0
+      ? ` (${(file.size / 1024 / 1024).toFixed(1)} MB)`
+      : "";
+  return `${label} failed — connection lost or timed out${size}. Try uploading one episode at a time, or use a smaller PDF. Check Railway logs if this keeps happening.`;
+}
+
+async function postJson(url: string, body: unknown, label: string) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await readJson(res);
+    if (!res.ok) {
+      throw new Error(
+        typeof data.error === "string" ? data.error : `${label} failed (HTTP ${res.status})`
+      );
+    }
+    return data;
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error(networkErrorMessage(label));
+    }
+    throw e;
+  }
+}
+
+async function postPdf(
+  form: FormData,
+  label: string,
+  file?: File | null
+): Promise<Record<string, unknown> & { error?: string }> {
+  try {
+    const res = await fetch("/api/scripts", { method: "POST", body: form });
+    const data = await readJson(res);
+    if (!res.ok) {
+      throw new Error(
+        typeof data.error === "string"
+          ? data.error
+          : `${label} failed (HTTP ${res.status})`
+      );
+    }
+    return data;
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error(networkErrorMessage(label, file));
+    }
+    throw e;
   }
 }
 
@@ -98,18 +153,17 @@ export default function NewProjectPage() {
         : [];
 
     setLoading(true);
+    let projectId: string | null = null;
     try {
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim() }),
-      });
-      const project = await readJson(res);
-      if (!res.ok) throw new Error(project.error || "Failed to create project");
+      const project = await postJson(
+        "/api/projects",
+        { title: title.trim() },
+        "Create project"
+      );
       if (typeof project.id !== "string") {
         throw new Error("Create project did not return an id");
       }
-      const projectId = project.id;
+      projectId = project.id;
 
       if (kind === "series") {
         for (let i = 0; i < ready.length; i++) {
@@ -122,50 +176,50 @@ export default function NewProjectPage() {
             d.title.trim() ||
             (d.file ? d.file.name.replace(/\.pdf$/i, "") : `Episode ${epNum}`);
 
-          if (d.mode === "pdf" && d.file) {
-            const form = new FormData();
-            form.append("projectId", projectId);
-            form.append("title", scriptTitle);
-            form.append("episodeNumber", String(epNum));
-            form.append(
-              "file",
-              new File([d.file], d.file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"), {
-                type: d.file.type || "application/pdf",
-              })
-            );
-            const scriptRes = await fetch("/api/scripts", {
-              method: "POST",
-              body: form,
-            });
-            const scriptData = await readJson(scriptRes);
-            if (!scriptRes.ok) {
-              throw new Error(
-                scriptData.error ||
-                  `PDF parse failed for ${scriptTitle} (HTTP ${scriptRes.status})`
+          const progress = toast.loading(
+            `Uploading episode ${i + 1} of ${ready.length}: ${scriptTitle}…`
+          );
+
+          try {
+            if (d.mode === "pdf" && d.file) {
+              const form = new FormData();
+              form.append("projectId", projectId);
+              form.append("title", scriptTitle);
+              form.append("episodeNumber", String(epNum));
+              form.append("file", fileWithSafeName(d.file));
+              await postPdf(
+                form,
+                `PDF parse failed for ${scriptTitle}`,
+                d.file
+              );
+            } else {
+              await postJson(
+                "/api/scripts",
+                {
+                  projectId,
+                  title: scriptTitle,
+                  episodeNumber: epNum,
+                  rawText: d.text.trim(),
+                  sourceType: "typed",
+                },
+                `Failed to add ${scriptTitle}`
               );
             }
-          } else {
-            const scriptRes = await fetch("/api/scripts", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                projectId,
-                title: scriptTitle,
-                episodeNumber: epNum,
-                rawText: d.text.trim(),
-                sourceType: "typed",
-              }),
-            });
-            const scriptData = await readJson(scriptRes);
-            if (!scriptRes.ok) {
-              throw new Error(scriptData.error || "Failed to add script");
-            }
+            toast.success(`Episode ${epNum} uploaded`, { id: progress });
+          } catch (e) {
+            toast.dismiss(progress);
+            throw e;
           }
         }
       }
 
       router.push(`/projects/${projectId}`);
     } catch (e) {
+      if (projectId) {
+        await fetch(`/api/projects?id=${projectId}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
       toast.error(e instanceof Error ? e.message : "Could not create project");
       setLoading(false);
     }

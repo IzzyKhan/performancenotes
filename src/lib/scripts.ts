@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { db } from "@/db";
+import { db, sqlite } from "@/db";
 import { cheatSheets, scenes, scripts } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { mapScene, mapScript } from "@/lib/mappers";
@@ -73,41 +73,48 @@ export function createScriptWithScenes(opts: {
       : nextEpisodeNumber(opts.projectId);
   const title = opts.title.trim() || `Episode ${episodeNumber}`;
 
-  db.insert(scripts)
-    .values({
-      id: scriptId,
-      projectId: opts.projectId,
-      title,
-      orderIndex,
-      episodeNumber,
-      sourceType: opts.sourceType,
-      createdAt: now,
-    })
-    .run();
-
   const parts = splitScenes(opts.rawText.trim());
-  const createdScenes = parts.map((part, i) => {
-    const id = createId("scene");
-    db.insert(scenes)
+  const sceneRows = parts.map((part, i) => ({
+    id: createId("scene"),
+    projectId: opts.projectId,
+    scriptId,
+    heading: part.heading,
+    orderIndex: i,
+    sceneNumber: part.sceneNumber,
+    rawText: part.text,
+    sourceType: opts.sourceType,
+    parsedMeta: JSON.stringify(parseScreenplayText(part.text)),
+    createdAt: now,
+  }));
+
+  sqlite.transaction(() => {
+    db.insert(scripts)
       .values({
-        id,
+        id: scriptId,
         projectId: opts.projectId,
-        scriptId,
-        heading: part.heading,
-        orderIndex: i,
-        sceneNumber: part.sceneNumber,
-        rawText: part.text,
+        title,
+        orderIndex,
+        episodeNumber,
         sourceType: opts.sourceType,
-        parsedMeta: JSON.stringify(parseScreenplayText(part.text)),
         createdAt: now,
       })
       .run();
-    return mapScene(db.select().from(scenes).where(eq(scenes.id, id)).get()!);
-  });
+
+    for (const row of sceneRows) {
+      db.insert(scenes).values(row).run();
+    }
+  })();
 
   const script = mapScript(
     db.select().from(scripts).where(eq(scripts.id, scriptId)).get()!
   );
+  const createdScenes = db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.scriptId, scriptId))
+    .orderBy(asc(scenes.orderIndex))
+    .all()
+    .map(mapScene);
 
   return { script, scenes: createdScenes };
 }
