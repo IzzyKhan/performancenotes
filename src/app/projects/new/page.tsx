@@ -58,6 +58,7 @@ export default function NewProjectPage() {
   const [kind, setKind] = useState<ProjectKind | null>(null);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState("");
   const [drafts, setDrafts] = useState<ScriptDraft[]>([emptyDraft(0)]);
 
   function updateDraft(key: string, patch: Partial<ScriptDraft>) {
@@ -98,6 +99,7 @@ export default function NewProjectPage() {
         : [];
 
     setLoading(true);
+    setProgress("Creating project…");
     try {
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -111,7 +113,9 @@ export default function NewProjectPage() {
       }
       const projectId = project.id;
 
-      if (kind === "series") {
+      if (kind === "series" && ready.length > 0) {
+        const errors: string[] = [];
+
         for (let i = 0; i < ready.length; i++) {
           const d = ready[i];
           const epNum =
@@ -122,44 +126,67 @@ export default function NewProjectPage() {
             d.title.trim() ||
             (d.file ? d.file.name.replace(/\.pdf$/i, "") : `Episode ${epNum}`);
 
-          if (d.mode === "pdf" && d.file) {
-            const form = new FormData();
-            form.append("projectId", projectId);
-            form.append("title", scriptTitle);
-            form.append("episodeNumber", String(epNum));
-            form.append(
-              "file",
-              new File([d.file], d.file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"), {
-                type: d.file.type || "application/pdf",
-              })
-            );
-            const scriptRes = await fetch("/api/scripts", {
-              method: "POST",
-              body: form,
-            });
-            const scriptData = await readJson(scriptRes);
-            if (!scriptRes.ok) {
-              throw new Error(
-                scriptData.error ||
-                  `PDF parse failed for ${scriptTitle} (HTTP ${scriptRes.status})`
+          setProgress(
+            `Uploading ${scriptTitle} (${i + 1}/${ready.length})…`
+          );
+
+          try {
+            if (d.mode === "pdf" && d.file) {
+              const form = new FormData();
+              form.append("projectId", projectId);
+              form.append("title", scriptTitle);
+              form.append("episodeNumber", String(epNum));
+              form.append(
+                "file",
+                new File(
+                  [d.file],
+                  d.file.name
+                    .replace(/[^\x20-\x7E]/g, "_")
+                    .replace(/\s+/g, "_"),
+                  { type: d.file.type || "application/pdf" }
+                )
               );
+              const scriptRes = await fetch("/api/scripts", {
+                method: "POST",
+                body: form,
+              });
+              const scriptData = await readJson(scriptRes);
+              if (!scriptRes.ok) {
+                throw new Error(
+                  scriptData.error ||
+                    `PDF parse failed (HTTP ${scriptRes.status})`
+                );
+              }
+            } else {
+              const scriptRes = await fetch("/api/scripts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  projectId,
+                  title: scriptTitle,
+                  episodeNumber: epNum,
+                  rawText: d.text.trim(),
+                  sourceType: "typed",
+                }),
+              });
+              const scriptData = await readJson(scriptRes);
+              if (!scriptRes.ok) {
+                throw new Error(scriptData.error || "Failed to add script");
+              }
             }
-          } else {
-            const scriptRes = await fetch("/api/scripts", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                projectId,
-                title: scriptTitle,
-                episodeNumber: epNum,
-                rawText: d.text.trim(),
-                sourceType: "typed",
-              }),
-            });
-            const scriptData = await readJson(scriptRes);
-            if (!scriptRes.ok) {
-              throw new Error(scriptData.error || "Failed to add script");
-            }
+          } catch (epErr) {
+            const msg =
+              epErr instanceof Error ? epErr.message : "Unknown error";
+            errors.push(`${scriptTitle}: ${msg}`);
+          }
+        }
+
+        if (errors.length > 0) {
+          for (const err of errors) toast.error(err);
+          if (errors.length < ready.length) {
+            toast.success(
+              `Project created. ${ready.length - errors.length}/${ready.length} scripts uploaded.`
+            );
           }
         }
       }
@@ -168,6 +195,8 @@ export default function NewProjectPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create project");
       setLoading(false);
+    } finally {
+      setProgress("");
     }
   }
 
@@ -421,9 +450,14 @@ export default function NewProjectPage() {
                 </div>
               ) : null}
 
-              <Button disabled={loading} onClick={() => void createProject()}>
-                {loading ? "Creating…" : "Create project"}
-              </Button>
+              <div className="space-y-2">
+                <Button disabled={loading} onClick={() => void createProject()}>
+                  {loading ? "Creating…" : "Create project"}
+                </Button>
+                {progress ? (
+                  <p className="text-xs text-muted-foreground">{progress}</p>
+                ) : null}
+              </div>
             </>
           ) : null}
         </div>
