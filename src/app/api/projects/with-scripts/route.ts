@@ -43,6 +43,11 @@ function deleteProjectCascade(projectId: string) {
 }
 
 export async function POST(request: Request) {
+  console.info(
+    "[api/projects/with-scripts] start",
+    request.headers.get("content-length") ?? "unknown-length"
+  );
+
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 

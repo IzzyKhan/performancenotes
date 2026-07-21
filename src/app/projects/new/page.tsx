@@ -84,27 +84,48 @@ async function postJson(url: string, body: unknown, label: string) {
   }
 }
 
-async function postForm(
-  url: string,
-  form: FormData,
-  label: string
-): Promise<Record<string, unknown> & { id?: string; error?: string }> {
+async function listProjectScripts(projectId: string) {
+  const res = await fetch(`/api/scripts?projectId=${projectId}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [] as { episodeNumber?: number; title?: string }[];
+  return (await res.json()) as { episodeNumber?: number; title?: string }[];
+}
+
+async function uploadScriptPdf(
+  projectId: string,
+  epNum: number,
+  scriptTitle: string,
+  file: File
+): Promise<{ sceneCount?: number }> {
+  const form = new FormData();
+  form.append("projectId", projectId);
+  form.append("title", scriptTitle);
+  form.append("episodeNumber", String(epNum));
+  form.append("file", fileWithSafeName(file));
+
   try {
-    const res = await fetch(url, { method: "POST", body: form });
+    const res = await fetch("/api/scripts", { method: "POST", body: form });
     const data = await readJson(res);
     if (!res.ok) {
       throw new Error(
         typeof data.error === "string"
           ? data.error
-          : `${label} failed (HTTP ${res.status})`
+          : `PDF upload failed (HTTP ${res.status})`
       );
     }
-    return data;
+    return data as { sceneCount?: number };
   } catch (e) {
+    const scripts = await listProjectScripts(projectId);
+    const recovered = scripts.some(
+      (s) =>
+        s.episodeNumber === epNum ||
+        (s.title &&
+          s.title.toLowerCase() === scriptTitle.toLowerCase())
+    );
+    if (recovered) return {};
     if (e instanceof TypeError) {
-      throw new Error(
-        `${label} failed — connection lost or timed out. Try fewer/smaller PDFs, or check Railway logs.`
-      );
+      throw new Error(networkErrorMessage(`PDF upload for ${scriptTitle}`, file));
     }
     throw e;
   }
@@ -155,73 +176,8 @@ export default function NewProjectPage() {
         : [];
 
     setLoading(true);
+    let projectId: string | null = null;
     try {
-      if (kind === "series" && ready.length > 0) {
-        const progress = toast.loading(
-          `Creating project and uploading ${ready.length} episode${ready.length === 1 ? "" : "s"}…`
-        );
-
-        try {
-          let pdfIndex = 0;
-          const episodes = ready.map((d, i) => {
-            const epNum =
-              Number.isFinite(d.episodeNumber) && d.episodeNumber >= 1
-                ? Math.floor(d.episodeNumber)
-                : i + 1;
-            const scriptTitle =
-              d.title.trim() ||
-              (d.file ? d.file.name.replace(/\.pdf$/i, "") : `Episode ${epNum}`);
-
-            if (d.mode === "pdf" && d.file) {
-              const entry = {
-                episodeNumber: epNum,
-                title: scriptTitle,
-                mode: "pdf" as const,
-                fileIndex: pdfIndex,
-              };
-              pdfIndex += 1;
-              return entry;
-            }
-            return {
-              episodeNumber: epNum,
-              title: scriptTitle,
-              mode: "typed" as const,
-              rawText: d.text.trim(),
-            };
-          });
-
-          const form = new FormData();
-          form.append("title", title.trim());
-          form.append("episodes", JSON.stringify(episodes));
-          pdfIndex = 0;
-          for (const d of ready) {
-            if (d.mode === "pdf" && d.file) {
-              form.append(`file_${pdfIndex}`, fileWithSafeName(d.file));
-              pdfIndex += 1;
-            }
-          }
-
-          const data = await postForm(
-            "/api/projects/with-scripts",
-            form,
-            "Create project"
-          );
-          if (typeof data.id !== "string") {
-            throw new Error("Create project did not return an id");
-          }
-
-          toast.success(
-            `Project created with ${ready.length} episode${ready.length === 1 ? "" : "s"}`,
-            { id: progress }
-          );
-          router.push(`/projects/${data.id}`);
-          return;
-        } catch (e) {
-          toast.dismiss(progress);
-          throw e;
-        }
-      }
-
       const project = await postJson(
         "/api/projects",
         { title: title.trim() },
@@ -230,9 +186,73 @@ export default function NewProjectPage() {
       if (typeof project.id !== "string") {
         throw new Error("Create project did not return an id");
       }
+      projectId = project.id;
 
-      router.push(`/projects/${project.id}`);
+      if (kind === "series" && ready.length > 0) {
+        for (let i = 0; i < ready.length; i++) {
+          const d = ready[i];
+          const epNum =
+            Number.isFinite(d.episodeNumber) && d.episodeNumber >= 1
+              ? Math.floor(d.episodeNumber)
+              : i + 1;
+          const scriptTitle =
+            d.title.trim() ||
+            (d.file ? d.file.name.replace(/\.pdf$/i, "") : `Episode ${epNum}`);
+
+          const progress = toast.loading(
+            `Uploading episode ${i + 1} of ${ready.length}: ${scriptTitle}…`
+          );
+
+          try {
+            if (d.mode === "pdf" && d.file) {
+              const data = await uploadScriptPdf(
+                projectId,
+                epNum,
+                scriptTitle,
+                d.file
+              );
+              toast.success(
+                typeof data.sceneCount === "number" && data.sceneCount > 0
+                  ? `Episode ${epNum} uploaded (${data.sceneCount} scenes)`
+                  : `Episode ${epNum} uploaded`,
+                { id: progress }
+              );
+            } else {
+              await postJson(
+                "/api/scripts",
+                {
+                  projectId,
+                  title: scriptTitle,
+                  episodeNumber: epNum,
+                  rawText: d.text.trim(),
+                  sourceType: "typed",
+                },
+                `Failed to add ${scriptTitle}`
+              );
+              toast.success(`Episode ${epNum} uploaded`, { id: progress });
+            }
+          } catch (e) {
+            toast.dismiss(progress);
+            throw e;
+          }
+        }
+      }
+
+      router.push(`/projects/${projectId}`);
     } catch (e) {
+      if (projectId) {
+        const scripts = await listProjectScripts(projectId);
+        if (scripts.length > 0) {
+          toast.warning(
+            "Upload interrupted — opening project with the scripts that saved."
+          );
+          router.push(`/projects/${projectId}`);
+          return;
+        }
+        await fetch(`/api/projects?id=${projectId}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
       toast.error(e instanceof Error ? e.message : "Could not create project");
       setLoading(false);
     }

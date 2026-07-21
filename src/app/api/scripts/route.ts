@@ -30,6 +30,11 @@ export async function GET(request: Request) {
  * or multipart { projectId, title?, episodeNumber?, file }.
  */
 export async function POST(request: Request) {
+  console.info(
+    "[api/scripts POST] start",
+    request.headers.get("content-length") ?? "unknown-length"
+  );
+
   try {
     const contentType = request.headers.get("content-type") || "";
 
@@ -125,7 +130,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result, {
       status: 201,
-      headers: { "Cache-Control": "no-store" },
+      headers: {
+        "Cache-Control": "no-store",
+        Connection: "close",
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to add script";

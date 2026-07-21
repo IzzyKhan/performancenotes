@@ -11,9 +11,9 @@ const nextConfig: NextConfig = {
   experimental: {
     // proxy.ts buffers request bodies (default 10MB). Screenplay PDFs often
     // exceed that; truncated bodies then fail FormData parsing.
-    proxyClientMaxBodySize: "50mb",
+    proxyClientMaxBodySize: "100mb",
     serverActions: {
-      bodySizeLimit: "50mb",
+      bodySizeLimit: "100mb",
     },
   },
 };
