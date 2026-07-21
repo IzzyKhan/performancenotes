@@ -108,6 +108,7 @@ export async function POST(request: Request) {
     const access = await requireProjectAccess(projectId);
     if ("error" in access) return access.error;
 
+    const saveStarted = Date.now();
     const result = createScriptWithScenes({
       projectId,
       title,
@@ -118,6 +119,9 @@ export async function POST(request: Request) {
           ? episodeNumber
           : undefined,
     });
+    console.info(
+      `[api/scripts POST] Saved ${title}: ${result.sceneCount} scenes, ${Date.now() - saveStarted}ms`
+    );
 
     return NextResponse.json(result, { status: 201 });
   } catch (err) {

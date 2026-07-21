@@ -13,8 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Scene, Script } from "@/types";
+import type { Scene, Script, ProjectBundle } from "@/types";
 import { toast } from "sonner";
+import { fileWithSafeName } from "@/lib/multipart";
 import { ScreenplayView } from "@/components/scene/screenplay-view";
 import { sceneSlugLabel } from "@/lib/schedule";
 
@@ -55,9 +56,26 @@ export function ScenePanel({
     setText(activeScene?.rawText ?? "");
   }, [activeScene?.id, activeScene?.rawText]);
 
-  function mergeScriptScenes(scriptId: string, nextForScript: Scene[]) {
-    const others = scenes.filter((s) => s.scriptId !== scriptId);
-    onScenesChange([...others, ...nextForScript]);
+  async function syncProjectData(preferredScriptId?: string) {
+    const res = await fetch(`/api/projects/${projectId}?_=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const data = (await res.json()) as ProjectBundle & { error?: string };
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to refresh project");
+    }
+    if (Array.isArray(data.scripts)) onScriptsChange(data.scripts);
+    if (Array.isArray(data.scenes)) {
+      onScenesChange(data.scenes);
+      if (preferredScriptId) {
+        onActiveScriptChange(preferredScriptId);
+        const first = data.scenes
+          .filter((s) => s.scriptId === preferredScriptId)
+          .sort((a, b) => a.orderIndex - b.orderIndex)[0];
+        if (first) onActiveSceneChange(first.id);
+      }
+    }
+    return data;
   }
 
   async function saveTyped() {
@@ -90,10 +108,11 @@ export function ScenePanel({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed");
-        mergeScriptScenes(activeScriptId, data);
-        if (data[0]) onActiveSceneChange(data[0].id);
+        await syncProjectData(activeScriptId);
         toast.success(
-          data.length > 1 ? `Split into ${data.length} scenes` : "Scene saved"
+          typeof data.sceneCount === "number" && data.sceneCount > 1
+            ? `Split into ${data.sceneCount} scenes`
+            : "Scene saved"
         );
       } else {
         const res = await fetch("/api/scripts", {
@@ -108,13 +127,12 @@ export function ScenePanel({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed");
-        onScriptsChange([...scripts, data.script]);
-        onScenesChange([...scenes, ...data.scenes]);
-        onActiveScriptChange(data.script.id);
-        if (data.scenes[0]) onActiveSceneChange(data.scenes[0].id);
+        await syncProjectData(
+          typeof data.script?.id === "string" ? data.script.id : undefined
+        );
         toast.success(
-          data.scenes.length > 1
-            ? `Split into ${data.scenes.length} scenes`
+          typeof data.sceneCount === "number" && data.sceneCount > 1
+            ? `Split into ${data.sceneCount} scenes`
             : "Scene saved"
         );
       }
@@ -142,48 +160,32 @@ export function ScenePanel({
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("title", file.name.replace(/\.pdf$/i, ""));
-        form.append(
-          "file",
-          new File(
-            [file],
-            file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"),
-            { type: file.type || "application/pdf" }
-          )
-        );
+        form.append("file", fileWithSafeName(file));
         const res = await fetch("/api/scripts", { method: "POST", body: form });
         const raw = await res.text();
         const data = raw ? JSON.parse(raw) : {};
         if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
-        onScriptsChange([...scripts, data.script]);
-        onScenesChange([...scenes, ...data.scenes]);
-        onActiveScriptChange(data.script.id);
-        if (data.scenes[0]) onActiveSceneChange(data.scenes[0].id);
+        await syncProjectData(
+          typeof data.script?.id === "string" ? data.script.id : undefined
+        );
         toast.success(
-          data.scenes.length > 1
-            ? `Episode added — ${data.scenes.length} scenes`
+          typeof data.sceneCount === "number" && data.sceneCount > 1
+            ? `Episode added — ${data.sceneCount} scenes`
             : "Episode added"
         );
       } else {
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("scriptId", activeScriptId);
-        form.append(
-          "file",
-          new File(
-            [file],
-            file.name.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, "_"),
-            { type: file.type || "application/pdf" }
-          )
-        );
+        form.append("file", fileWithSafeName(file));
         const res = await fetch("/api/scenes", { method: "POST", body: form });
         const raw = await res.text();
         const data = raw ? JSON.parse(raw) : {};
         if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
-        mergeScriptScenes(activeScriptId, data);
-        if (data[0]) onActiveSceneChange(data[0].id);
+        await syncProjectData(activeScriptId);
         toast.success(
-          data.length > 1
-            ? `Episode replaced — ${data.length} scenes`
+          typeof data.sceneCount === "number" && data.sceneCount > 1
+            ? `Episode replaced — ${data.sceneCount} scenes`
             : "Episode replaced"
         );
       }

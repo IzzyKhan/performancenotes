@@ -187,10 +187,16 @@ export default function NewProjectPage() {
               form.append("title", scriptTitle);
               form.append("episodeNumber", String(epNum));
               form.append("file", fileWithSafeName(d.file));
-              await postPdf(
+              const data = await postPdf(
                 form,
                 `PDF parse failed for ${scriptTitle}`,
                 d.file
+              );
+              toast.success(
+                typeof data.sceneCount === "number" && data.sceneCount > 0
+                  ? `Episode ${epNum} uploaded (${data.sceneCount} scenes)`
+                  : `Episode ${epNum} uploaded`,
+                { id: progress }
               );
             } else {
               await postJson(
@@ -204,8 +210,8 @@ export default function NewProjectPage() {
                 },
                 `Failed to add ${scriptTitle}`
               );
+              toast.success(`Episode ${epNum} uploaded`, { id: progress });
             }
-            toast.success(`Episode ${epNum} uploaded`, { id: progress });
           } catch (e) {
             toast.dismiss(progress);
             throw e;

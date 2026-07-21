@@ -14,6 +14,7 @@ import {
 } from "@/lib/scripts";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -58,7 +59,11 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const started = Date.now();
     rawText = await extractPdfTextWithLines(new Uint8Array(buffer));
+    console.info(
+      `[api/scenes POST] PDF extracted ${title || file.name}: ${(buffer.length / 1024 / 1024).toFixed(1)}MB, ${Date.now() - started}ms`
+    );
     sourceType = "pdf";
     if (!title) {
       title = file.name.replace(/\.pdf$/i, "").trim();
@@ -89,6 +94,8 @@ export async function POST(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
+  const saveStarted = Date.now();
+
   if (scriptId) {
     const script = db
       .select()
@@ -99,13 +106,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Script not found" }, { status: 404 });
     }
 
-    const created = replaceScriptScenes({
+    const sceneCount = replaceScriptScenes({
       projectId,
       scriptId,
       rawText,
       sourceType,
     });
-    return NextResponse.json(created, { status: 201 });
+    console.info(
+      `[api/scenes POST] Replaced ${scriptId}: ${sceneCount} scenes, ${Date.now() - saveStarted}ms`
+    );
+    return NextResponse.json({ scriptId, sceneCount }, { status: 201 });
   }
 
   const result = createScriptWithScenes({
@@ -114,7 +124,10 @@ export async function POST(request: Request) {
     rawText,
     sourceType,
   });
-  return NextResponse.json(result.scenes, { status: 201 });
+  console.info(
+    `[api/scenes POST] Created ${result.script.title}: ${result.sceneCount} scenes, ${Date.now() - saveStarted}ms`
+  );
+  return NextResponse.json(result, { status: 201 });
 }
 
 /** Edit a single scene's text (re-parses characters/beats). */

@@ -1,10 +1,15 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, sqlite } from "@/db";
 import { cheatSheets, scenes, scripts } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { mapScene, mapScript } from "@/lib/mappers";
 import { parseScreenplayText, splitScenes } from "@/lib/screenplay";
 import type { Scene, Script, SceneSourceType } from "@/types";
+
+export type ScriptCreateResult = {
+  script: Script;
+  sceneCount: number;
+};
 
 export function listScriptsForProject(projectId: string): Script[] {
   return db
@@ -16,7 +21,28 @@ export function listScriptsForProject(projectId: string): Script[] {
     .map(mapScript);
 }
 
+/** Parse character/beat meta for scenes that were imported without it. */
+export function backfillParsedMeta(projectId: string, limit = 30): void {
+  const rows = db
+    .select({ id: scenes.id, rawText: scenes.rawText })
+    .from(scenes)
+    .where(and(eq(scenes.projectId, projectId), isNull(scenes.parsedMeta)))
+    .limit(limit)
+    .all();
+
+  for (const row of rows) {
+    db.update(scenes)
+      .set({
+        parsedMeta: JSON.stringify(parseScreenplayText(row.rawText)),
+      })
+      .where(eq(scenes.id, row.id))
+      .run();
+  }
+}
+
 export function listScenesForProject(projectId: string): Scene[] {
+  backfillParsedMeta(projectId);
+
   const scriptRows = listScriptsForProject(projectId);
   const scriptOrder = new Map(
     scriptRows.map((s) => [s.id, s.episodeNumber * 1000 + s.orderIndex])
@@ -63,7 +89,7 @@ export function createScriptWithScenes(opts: {
   sourceType: SceneSourceType;
   orderIndex?: number;
   episodeNumber?: number;
-}): { script: Script; scenes: Scene[] } {
+}): ScriptCreateResult {
   const now = nowIso();
   const scriptId = createId("script");
   const orderIndex = opts.orderIndex ?? nextScriptOrderIndex(opts.projectId);
@@ -83,7 +109,7 @@ export function createScriptWithScenes(opts: {
     sceneNumber: part.sceneNumber,
     rawText: part.text,
     sourceType: opts.sourceType,
-    parsedMeta: JSON.stringify(parseScreenplayText(part.text)),
+    parsedMeta: null as string | null,
     createdAt: now,
   }));
 
@@ -108,15 +134,8 @@ export function createScriptWithScenes(opts: {
   const script = mapScript(
     db.select().from(scripts).where(eq(scripts.id, scriptId)).get()!
   );
-  const createdScenes = db
-    .select()
-    .from(scenes)
-    .where(eq(scenes.scriptId, scriptId))
-    .orderBy(asc(scenes.orderIndex))
-    .all()
-    .map(mapScene);
 
-  return { script, scenes: createdScenes };
+  return { script, sceneCount: sceneRows.length };
 }
 
 /** Replace all scenes under a script; drop their per-scene cheat sheets. */
@@ -125,49 +144,58 @@ export function replaceScriptScenes(opts: {
   scriptId: string;
   rawText: string;
   sourceType: SceneSourceType;
-}): Scene[] {
+}): number {
   const now = nowIso();
-  const oldScenes = db
-    .select()
-    .from(scenes)
-    .where(
-      and(eq(scenes.projectId, opts.projectId), eq(scenes.scriptId, opts.scriptId))
-    )
-    .all();
-
-  for (const old of oldScenes) {
-    db.delete(cheatSheets).where(eq(cheatSheets.sceneId, old.id)).run();
-  }
-  db.delete(scenes)
-    .where(
-      and(eq(scenes.projectId, opts.projectId), eq(scenes.scriptId, opts.scriptId))
-    )
-    .run();
-
-  db.update(scripts)
-    .set({ sourceType: opts.sourceType })
-    .where(eq(scripts.id, opts.scriptId))
-    .run();
-
   const parts = splitScenes(opts.rawText.trim());
-  return parts.map((part, i) => {
-    const id = createId("scene");
-    db.insert(scenes)
-      .values({
-        id,
-        projectId: opts.projectId,
-        scriptId: opts.scriptId,
-        heading: part.heading,
-        orderIndex: i,
-        sceneNumber: part.sceneNumber,
-        rawText: part.text,
-        sourceType: opts.sourceType,
-        parsedMeta: JSON.stringify(parseScreenplayText(part.text)),
-        createdAt: now,
-      })
+  const sceneRows = parts.map((part, i) => ({
+    id: createId("scene"),
+    projectId: opts.projectId,
+    scriptId: opts.scriptId,
+    heading: part.heading,
+    orderIndex: i,
+    sceneNumber: part.sceneNumber,
+    rawText: part.text,
+    sourceType: opts.sourceType,
+    parsedMeta: null as string | null,
+    createdAt: now,
+  }));
+
+  sqlite.transaction(() => {
+    const oldScenes = db
+      .select({ id: scenes.id })
+      .from(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
+      )
+      .all();
+
+    for (const old of oldScenes) {
+      db.delete(cheatSheets).where(eq(cheatSheets.sceneId, old.id)).run();
+    }
+
+    db.delete(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
+      )
       .run();
-    return mapScene(db.select().from(scenes).where(eq(scenes.id, id)).get()!);
-  });
+
+    db.update(scripts)
+      .set({ sourceType: opts.sourceType })
+      .where(eq(scripts.id, opts.scriptId))
+      .run();
+
+    for (const row of sceneRows) {
+      db.insert(scenes).values(row).run();
+    }
+  })();
+
+  return sceneRows.length;
 }
 
 export function deleteScriptAndScenes(scriptId: string) {
