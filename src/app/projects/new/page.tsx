@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { fileWithSafeName } from "@/lib/multipart";
+import { postWithRetry, UploadError } from "@/lib/upload-client";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type ProjectKind = "single" | "series";
@@ -104,31 +105,40 @@ async function uploadScriptPdf(
   form.append("episodeNumber", String(epNum));
   form.append("file", fileWithSafeName(file));
 
-  try {
-    const res = await fetch("/api/scripts", { method: "POST", body: form });
-    const data = await readJson(res);
-    if (!res.ok) {
-      throw new Error(
-        typeof data.error === "string"
-          ? data.error
-          : `PDF upload failed (HTTP ${res.status})`
-      );
-    }
-    return data as { sceneCount?: number };
-  } catch (e) {
+  // Creating a script is not idempotent, so we can't blindly retry: a lost
+  // response would duplicate the episode. Between attempts, check whether the
+  // script actually saved server-side and stop if it did.
+  const alreadySaved = async () => {
     const scripts = await listProjectScripts(projectId);
-    const recovered = scripts.some(
+    return scripts.some(
       (s) =>
         s.episodeNumber === epNum ||
-        (s.title &&
-          s.title.toLowerCase() === scriptTitle.toLowerCase())
+        (s.title && s.title.toLowerCase() === scriptTitle.toLowerCase())
     );
-    if (recovered) return {};
-    if (e instanceof TypeError) {
-      throw new Error(networkErrorMessage(`PDF upload for ${scriptTitle}`, file));
+  };
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await postWithRetry("/api/scripts", form, {
+        label: `PDF upload for ${scriptTitle}`,
+        timeoutMs: 180_000,
+        retries: 0,
+      });
+      return data as { sceneCount?: number };
+    } catch (e) {
+      if (await alreadySaved()) return {};
+      if (e instanceof UploadError && e.status !== undefined && ![502, 503, 504].includes(e.status)) {
+        throw e; // Real application error (bad PDF, auth) — retrying won't help.
+      }
+      lastError =
+        e instanceof Error
+          ? e
+          : new Error(networkErrorMessage(`PDF upload for ${scriptTitle}`, file));
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     }
-    throw e;
   }
+  throw lastError ?? new Error(`PDF upload for ${scriptTitle} failed`);
 }
 
 export default function NewProjectPage() {

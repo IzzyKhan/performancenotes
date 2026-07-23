@@ -16,6 +16,7 @@ import {
 import type { Scene, Script, ProjectBundle } from "@/types";
 import { toast } from "sonner";
 import { fileWithSafeName } from "@/lib/multipart";
+import { postWithRetry } from "@/lib/upload-client";
 import { ScreenplayView } from "@/components/scene/screenplay-view";
 import { sceneSlugLabel } from "@/lib/schedule";
 
@@ -161,10 +162,13 @@ export function ScenePanel({
         form.append("projectId", projectId);
         form.append("title", file.name.replace(/\.pdf$/i, ""));
         form.append("file", fileWithSafeName(file));
-        const res = await fetch("/api/scripts", { method: "POST", body: form });
-        const raw = await res.text();
-        const data = raw ? JSON.parse(raw) : {};
-        if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
+        // retries: 0 — creating a script isn't idempotent; a retry after a
+        // lost response would duplicate the episode.
+        const data = (await postWithRetry("/api/scripts", form, {
+          label: "PDF upload",
+          timeoutMs: 180_000,
+          retries: 0,
+        })) as { script?: { id?: string }; sceneCount?: number };
         await syncProjectData(
           typeof data.script?.id === "string" ? data.script.id : undefined
         );
@@ -178,10 +182,11 @@ export function ScenePanel({
         form.append("projectId", projectId);
         form.append("scriptId", activeScriptId);
         form.append("file", fileWithSafeName(file));
-        const res = await fetch("/api/scenes", { method: "POST", body: form });
-        const raw = await res.text();
-        const data = raw ? JSON.parse(raw) : {};
-        if (!res.ok) throw new Error(data.error || "Failed to parse PDF");
+        // Replacing scenes is idempotent — safe to retry on network drops.
+        const data = (await postWithRetry("/api/scenes", form, {
+          label: "PDF upload",
+          timeoutMs: 180_000,
+        })) as { sceneCount?: number };
         await syncProjectData(activeScriptId);
         toast.success(
           typeof data.sceneCount === "number" && data.sceneCount > 1

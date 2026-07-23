@@ -1,19 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: [
-    "better-sqlite3",
-    "@react-pdf/renderer",
-    "heic-convert",
-    "heic-decode",
-    "libheif-js",
-  ],
+  serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer"],
   experimental: {
-    // proxy.ts buffers request bodies (default 10MB). Screenplay PDFs often
-    // exceed that; truncated bodies then fail FormData parsing.
-    proxyClientMaxBodySize: "100mb",
+    // proxy.ts matcher skips /api/* so uploads bypass proxy body buffering,
+    // but keep headroom for screenplay PDFs on any proxied route. Note: when
+    // this limit is exceeded the body is silently truncated (no client error)
+    // and FormData parsing fails downstream.
+    proxyClientMaxBodySize: "50mb",
     serverActions: {
-      bodySizeLimit: "100mb",
+      bodySizeLimit: "50mb",
     },
   },
 };

@@ -63,11 +63,18 @@ export async function POST(request: Request) {
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const started = Date.now();
+      console.info(
+        `[api/scripts POST] parsing PDF name="${file.name}" bytes=${buffer.length}`
+      );
       try {
         rawText = await extractPdfTextWithLines(new Uint8Array(buffer));
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "PDF parse failed";
+        console.error(
+          `[api/scripts POST] failed: PDF parse (name="${file.name}", bytes=${buffer.length})`,
+          err
+        );
         return NextResponse.json(
           {
             error: `Could not read that PDF (${message}). Try a smaller file or paste text instead.`,

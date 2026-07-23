@@ -37,6 +37,12 @@ import type { CanvasNode, CanvasNodeContent, CanvasNodeType } from "@/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
+import { postWithRetry, UploadError } from "@/lib/upload-client";
+import {
+  HEIC_ERROR_MESSAGE,
+  isHeicFile,
+  prepareImageForUpload,
+} from "@/lib/image-prep";
 
 type FlowNodeData = {
   canvasNode: CanvasNode;
@@ -46,19 +52,9 @@ type FlowNodeData = {
 
 type FlowNode = Node<FlowNodeData, CanvasNodeType>;
 
-function isHeicMime(mime: string): boolean {
-  return (
-    mime === "image/heic" ||
-    mime === "image/heif" ||
-    mime === "image/heic-sequence" ||
-    mime === "image/heif-sequence"
-  );
-}
-
-/** Browsers often omit mime for .heic — also match by extension. */
+/** HEIC counts as an image here so it reaches the clear rejection message. */
 function isImageFile(file: File): boolean {
-  if (file.type.startsWith("image/") || isHeicMime(file.type)) return true;
-  return /\.(heic|heif)$/i.test(file.name);
+  return file.type.startsWith("image/") || isHeicFile(file);
 }
 
 /** Keep React Flow from stealing focus / starting a drag while typing. */
@@ -612,44 +608,72 @@ function InstinctCanvasInner({
         x: 120 + Math.random() * 200,
         y: 120 + Math.random() * 200,
       };
-      const res = await fetch("/api/canvas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          sceneId,
-          type,
-          content,
-          positionX: pos.x,
-          positionY: pos.y,
-        }),
-      });
-      const node = (await res.json()) as CanvasNode;
-      setCanvasNodes((prev) => [...prev, node]);
-      setNodes((nds) => [
-        ...nds,
-        ...toFlowNodes([node], stableUpdate, stableDelete),
-      ]);
-      return node;
+      try {
+        const data = await postWithRetry(
+          "/api/canvas",
+          JSON.stringify({
+            projectId,
+            sceneId,
+            type,
+            content,
+            positionX: pos.x,
+            positionY: pos.y,
+          }),
+          { label: "Adding to canvas", timeoutMs: 30_000 }
+        );
+        const node = data as unknown as CanvasNode;
+        setCanvasNodes((prev) => [...prev, node]);
+        setNodes((nds) => [
+          ...nds,
+          ...toFlowNodes([node], stableUpdate, stableDelete),
+        ]);
+        return node;
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not add to canvas"
+        );
+        return null;
+      }
     },
     [projectId, sceneId, setNodes, stableUpdate, stableDelete]
   );
 
   const uploadFile = useCallback(
     async (file: File, type: "image" | "audio", position?: { x: number; y: number }) => {
-      const form = new FormData();
-      form.append("file", file);
-      const up = await fetch("/api/upload", { method: "POST", body: form });
-      const data = await up.json();
-      if (!up.ok) {
-        toast.error(data.error || "Upload failed");
+      if (type === "image" && isHeicFile(file)) {
+        toast.error(HEIC_ERROR_MESSAGE);
         return;
       }
-      await createNode(
-        type,
-        { filePath: data.filePath, mimeType: data.mimeType },
-        position
-      );
+
+      const label = type === "image" ? "Image upload" : "Audio upload";
+      const progress = toast.loading(`Uploading ${file.name}…`);
+      try {
+        const toSend =
+          type === "image" ? await prepareImageForUpload(file) : file;
+
+        const form = new FormData();
+        form.append("file", toSend);
+        const data = await postWithRetry("/api/upload", form, { label });
+
+        const node = await createNode(
+          type,
+          { filePath: data.filePath, mimeType: data.mimeType },
+          position
+        );
+        if (node) {
+          toast.success(`${type === "image" ? "Image" : "Audio"} added`, {
+            id: progress,
+          });
+        } else {
+          toast.dismiss(progress);
+        }
+      } catch (err) {
+        const message =
+          err instanceof UploadError || err instanceof Error
+            ? err.message
+            : `${label} failed`;
+        toast.error(message, { id: progress });
+      }
     },
     [createNode]
   );
@@ -688,7 +712,7 @@ function InstinctCanvasInner({
 
       const items = Array.from(e.clipboardData.items);
       for (const item of items) {
-        if (item.type.startsWith("image/") || isHeicMime(item.type)) {
+        if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (file) await uploadFile(file, "image");
         }
@@ -833,7 +857,7 @@ function InstinctCanvasInner({
             pendingUploadType === "audio"
               ? "audio/*"
               : pendingUploadType === "image"
-                ? "image/*,.heic,.heif,image/heic,image/heif"
+                ? "image/jpeg,image/png,image/gif,image/webp"
                 : "*/*"
           }
           onChange={onFilePicked}
