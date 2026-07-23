@@ -16,7 +16,7 @@ import {
 import type { Scene, Script, ProjectBundle } from "@/types";
 import { toast } from "sonner";
 import { fileWithSafeName } from "@/lib/multipart";
-import { postWithRetry } from "@/lib/upload-client";
+import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { ScreenplayView } from "@/components/scene/screenplay-view";
 import { sceneSlugLabel } from "@/lib/schedule";
 
@@ -157,11 +157,13 @@ export function ScenePanel({
 
     setUploading(true);
     try {
+      // Read bytes now — a stale file handle should fail fast, not mid-upload.
+      const snapshot = await snapshotFile(file);
       if (mode === "add" || !activeScriptId) {
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("title", file.name.replace(/\.pdf$/i, ""));
-        form.append("file", fileWithSafeName(file));
+        form.append("file", fileWithSafeName(snapshot));
         // retries: 0 — creating a script isn't idempotent; a retry after a
         // lost response would duplicate the episode.
         const data = (await postWithRetry("/api/scripts", form, {
@@ -181,7 +183,7 @@ export function ScenePanel({
         const form = new FormData();
         form.append("projectId", projectId);
         form.append("scriptId", activeScriptId);
-        form.append("file", fileWithSafeName(file));
+        form.append("file", fileWithSafeName(snapshot));
         // Replacing scenes is idempotent — safe to retry on network drops.
         const data = (await postWithRetry("/api/scenes", form, {
           label: "PDF upload",

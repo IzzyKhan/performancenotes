@@ -36,6 +36,27 @@ async function readJsonSafe(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
+/**
+ * Read the file's bytes into memory immediately. Browsers stream File objects
+ * lazily at request time; if the underlying file moved, changed, or was
+ * evicted (e.g. iCloud "Optimize Mac Storage"), the request sends its headers
+ * and then aborts mid-body — which looks like a network failure. Snapshotting
+ * fails fast with a clear message instead, and makes retries byte-stable.
+ */
+export async function snapshotFile(file: File): Promise<File> {
+  try {
+    const bytes = await file.arrayBuffer();
+    return new File([bytes], file.name, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+  } catch {
+    throw new UploadError(
+      `Could not read "${file.name}" — the file may have moved or changed since it was selected. Please choose it again.`
+    );
+  }
+}
+
 export interface UploadOptions {
   /** Human label used in error messages, e.g. "Image upload". */
   label: string;

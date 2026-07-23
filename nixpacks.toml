@@ -9,4 +9,5 @@ cmds = ["npm ci"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "sh -c 'npx next start -H 0.0.0.0 -p ${PORT:-3000}'"
+# keepAliveTimeout > Railway's 60s edge idle timeout (see railway.toml).
+cmd = "sh -c 'npx next start -H 0.0.0.0 -p ${PORT:-3000} --keepAliveTimeout 70000'"

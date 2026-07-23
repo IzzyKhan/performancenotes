@@ -16,7 +16,9 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "sh -c 'npx next start -H 0.0.0.0 -p ${PORT:-3000}'"
+# keepAliveTimeout must exceed Railway's 60s edge idle timeout, or the edge
+# can reuse a connection Node is closing -> instant ECONNRESET mid-upload.
+startCommand = "sh -c 'npx next start -H 0.0.0.0 -p ${PORT:-3000} --keepAliveTimeout 70000'"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

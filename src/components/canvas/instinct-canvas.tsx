@@ -37,7 +37,7 @@ import type { CanvasNode, CanvasNodeContent, CanvasNodeType } from "@/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { postWithRetry, UploadError } from "@/lib/upload-client";
+import { postWithRetry, snapshotFile, UploadError } from "@/lib/upload-client";
 import {
   HEIC_ERROR_MESSAGE,
   isHeicFile,
@@ -648,8 +648,10 @@ function InstinctCanvasInner({
       const label = type === "image" ? "Image upload" : "Audio upload";
       const progress = toast.loading(`Uploading ${file.name}…`);
       try {
+        // Read bytes now — a stale file handle should fail fast, not mid-upload.
+        const snapshot = await snapshotFile(file);
         const toSend =
-          type === "image" ? await prepareImageForUpload(file) : file;
+          type === "image" ? await prepareImageForUpload(snapshot) : snapshot;
 
         const form = new FormData();
         form.append("file", toSend);

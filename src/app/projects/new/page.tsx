@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { fileWithSafeName } from "@/lib/multipart";
-import { postWithRetry, UploadError } from "@/lib/upload-client";
+import { postWithRetry, snapshotFile, UploadError } from "@/lib/upload-client";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type ProjectKind = "single" | "series";
@@ -99,11 +99,13 @@ async function uploadScriptPdf(
   scriptTitle: string,
   file: File
 ): Promise<{ sceneCount?: number }> {
+  // The file may have been picked minutes ago while filling the form —
+  // read it into memory now so a stale handle fails fast with a clear error.
   const form = new FormData();
   form.append("projectId", projectId);
   form.append("title", scriptTitle);
   form.append("episodeNumber", String(epNum));
-  form.append("file", fileWithSafeName(file));
+  form.append("file", fileWithSafeName(await snapshotFile(file)));
 
   // Creating a script is not idempotent, so we can't blindly retry: a lost
   // response would duplicate the episode. Between attempts, check whether the
