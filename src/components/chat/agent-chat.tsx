@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ChatMessage, CheatSheet } from "@/types";
 import { cn } from "@/lib/utils";
+import { ChatMessageBody } from "@/components/chat/chat-message-body";
 
 export type AgentChatHandle = {
   distill: () => void;
@@ -218,13 +219,13 @@ export const AgentChat = forwardRef<
             <div
               key={m.id}
               className={cn(
-                "px-3 py-2 text-sm whitespace-pre-wrap",
+                "px-3 py-2 text-sm",
                 m.role === "user"
                   ? "ml-6 rounded-md bg-primary text-primary-foreground"
                   : "mr-4 rounded-md border border-border bg-transparent text-foreground"
               )}
             >
-              {m.content}
+              <ChatMessageBody content={m.content} role={m.role} />
             </div>
           ))}
           {streaming && !streamText && waitStatus ? (
@@ -238,8 +239,8 @@ export const AgentChat = forwardRef<
             </div>
           ) : null}
           {streamText ? (
-            <div className="mr-4 rounded-md border border-border bg-transparent px-3 py-2 text-sm whitespace-pre-wrap">
-              {streamText}
+            <div className="mr-4 rounded-md border border-border bg-transparent px-3 py-2 text-sm">
+              <ChatMessageBody content={streamText} role="assistant" />
               <span className="ml-0.5 inline-block h-3 w-px animate-pulse bg-foreground/70" />
             </div>
           ) : null}

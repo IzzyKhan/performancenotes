@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileUp, Plus, Type } from "lucide-react";
+import { FileUp, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { fileWithSafeName } from "@/lib/multipart";
 import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { ScreenplayView } from "@/components/scene/screenplay-view";
+import { AddScriptDialog } from "@/components/project/add-script-dialog";
 import { sceneSlugLabel } from "@/lib/schedule";
 
 export function ScenePanel({
@@ -51,7 +52,6 @@ export function ScenePanel({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const addEpisodeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setText(activeScene?.rawText ?? "");
@@ -144,8 +144,8 @@ export function ScenePanel({
     }
   }
 
-  async function uploadPdf(file: File, mode: "replace" | "add") {
-    if (mode === "replace" && activeScriptId && scriptScenes.length > 0) {
+  async function uploadPdf(file: File) {
+    if (activeScriptId && scriptScenes.length > 0) {
       if (
         !confirm(
           "Replacing this episode’s script removes its scenes and per-scene cheat sheets. Other episodes are kept. Continue?"
@@ -155,47 +155,28 @@ export function ScenePanel({
       }
     }
 
+    if (!activeScriptId) {
+      toast.error("Add an episode first, then replace its PDF");
+      return;
+    }
+
     setUploading(true);
     try {
-      // Read bytes now — a stale file handle should fail fast, not mid-upload.
       const snapshot = await snapshotFile(file);
-      if (mode === "add" || !activeScriptId) {
-        const form = new FormData();
-        form.append("projectId", projectId);
-        form.append("title", file.name.replace(/\.pdf$/i, ""));
-        form.append("file", fileWithSafeName(snapshot));
-        // retries: 0 — creating a script isn't idempotent; a retry after a
-        // lost response would duplicate the episode.
-        const data = (await postWithRetry("/api/scripts", form, {
-          label: "PDF upload",
-          timeoutMs: 180_000,
-          retries: 0,
-        })) as { script?: { id?: string }; sceneCount?: number };
-        await syncProjectData(
-          typeof data.script?.id === "string" ? data.script.id : undefined
-        );
-        toast.success(
-          typeof data.sceneCount === "number" && data.sceneCount > 1
-            ? `Episode added — ${data.sceneCount} scenes`
-            : "Episode added"
-        );
-      } else {
-        const form = new FormData();
-        form.append("projectId", projectId);
-        form.append("scriptId", activeScriptId);
-        form.append("file", fileWithSafeName(snapshot));
-        // Replacing scenes is idempotent — safe to retry on network drops.
-        const data = (await postWithRetry("/api/scenes", form, {
-          label: "PDF upload",
-          timeoutMs: 180_000,
-        })) as { sceneCount?: number };
-        await syncProjectData(activeScriptId);
-        toast.success(
-          typeof data.sceneCount === "number" && data.sceneCount > 1
-            ? `Episode replaced — ${data.sceneCount} scenes`
-            : "Episode replaced"
-        );
-      }
+      const form = new FormData();
+      form.append("projectId", projectId);
+      form.append("scriptId", activeScriptId);
+      form.append("file", fileWithSafeName(snapshot));
+      const data = (await postWithRetry("/api/scenes", form, {
+        label: "PDF upload",
+        timeoutMs: 180_000,
+      })) as { sceneCount?: number };
+      await syncProjectData(activeScriptId);
+      toast.success(
+        typeof data.sceneCount === "number" && data.sceneCount > 1
+          ? `Episode replaced — ${data.sceneCount} scenes`
+          : "Episode replaced"
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "PDF upload failed");
     } finally {
@@ -287,7 +268,7 @@ export function ScenePanel({
               size="sm"
               variant="outline"
               className="gap-1.5"
-              disabled={uploading}
+              disabled={uploading || !activeScriptId}
               onClick={() => fileRef.current?.click()}
             >
               <FileUp className="size-3.5" />
@@ -297,16 +278,14 @@ export function ScenePanel({
                   ? "Replace episode PDF"
                   : "Upload script PDF"}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
+            <AddScriptDialog
+              projectId={projectId}
+              scripts={scripts}
               disabled={uploading}
-              onClick={() => addEpisodeRef.current?.click()}
-            >
-              <Plus className="size-3.5" />
-              Add episode PDF
-            </Button>
+              onAdded={async (scriptId) => {
+                await syncProjectData(scriptId);
+              }}
+            />
             <Button
               size="sm"
               className="gap-1.5"
@@ -323,18 +302,7 @@ export function ScenePanel({
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) void uploadPdf(f, activeScriptId ? "replace" : "add");
-                e.target.value = "";
-              }}
-            />
-            <input
-              ref={addEpisodeRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void uploadPdf(f, "add");
+                if (f) void uploadPdf(f);
                 e.target.value = "";
               }}
             />

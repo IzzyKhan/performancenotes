@@ -748,12 +748,17 @@ function InstinctCanvasInner({
   }, [projectId, sceneId]);
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && pendingUploadType) {
-      await uploadFile(file, pendingUploadType);
-    }
+    const type = pendingUploadType;
+    const files = Array.from(e.target.files ?? []);
     setPendingUploadType(null);
     e.target.value = "";
+    if (!type || files.length === 0) return;
+
+    // Images support multi-select; audio stays one-at-a-time.
+    const toUpload = type === "image" ? files : files.slice(0, 1);
+    for (const file of toUpload) {
+      await uploadFile(file, type);
+    }
   };
 
   const empty = canvasNodes.length === 0;
@@ -855,6 +860,7 @@ function InstinctCanvasInner({
           ref={fileInputRef}
           type="file"
           className="hidden"
+          multiple={pendingUploadType === "image"}
           accept={
             pendingUploadType === "audio"
               ? "audio/*"

@@ -166,7 +166,13 @@ export default function NewProjectPage() {
   function chooseKind(next: ProjectKind) {
     setKind(next);
     if (next === "single") {
-      setDrafts([emptyDraft(0)]);
+      setDrafts([
+        {
+          ...emptyDraft(0),
+          episodeNumber: 1,
+          title: "",
+        },
+      ]);
     } else if (drafts.length === 0) {
       setDrafts([emptyDraft(0)]);
     }
@@ -178,14 +184,10 @@ export default function NewProjectPage() {
       return;
     }
 
-    const ready =
-      kind === "series"
-        ? drafts.filter(
-            (d) =>
-              (d.mode === "typed" && d.text.trim()) ||
-              (d.mode === "pdf" && d.file)
-          )
-        : [];
+    const ready = drafts.filter(
+      (d) =>
+        (d.mode === "typed" && d.text.trim()) || (d.mode === "pdf" && d.file)
+    );
 
     setLoading(true);
     let projectId: string | null = null;
@@ -200,19 +202,24 @@ export default function NewProjectPage() {
       }
       projectId = project.id;
 
-      if (kind === "series" && ready.length > 0) {
+      if (ready.length > 0) {
         for (let i = 0; i < ready.length; i++) {
           const d = ready[i];
           const epNum =
-            Number.isFinite(d.episodeNumber) && d.episodeNumber >= 1
-              ? Math.floor(d.episodeNumber)
-              : i + 1;
+            kind === "single"
+              ? 1
+              : Number.isFinite(d.episodeNumber) && d.episodeNumber >= 1
+                ? Math.floor(d.episodeNumber)
+                : i + 1;
           const scriptTitle =
             d.title.trim() ||
-            (d.file ? d.file.name.replace(/\.pdf$/i, "") : `Episode ${epNum}`);
+            (d.file ? d.file.name.replace(/\.pdf$/i, "") : "") ||
+            (kind === "single" ? title.trim() : `Episode ${epNum}`);
 
           const progress = toast.loading(
-            `Uploading episode ${i + 1} of ${ready.length}: ${scriptTitle}…`
+            kind === "single"
+              ? `Uploading script: ${scriptTitle}…`
+              : `Uploading episode ${i + 1} of ${ready.length}: ${scriptTitle}…`
           );
 
           try {
@@ -225,8 +232,12 @@ export default function NewProjectPage() {
               );
               toast.success(
                 typeof data.sceneCount === "number" && data.sceneCount > 0
-                  ? `Episode ${epNum} uploaded (${data.sceneCount} scenes)`
-                  : `Episode ${epNum} uploaded`,
+                  ? kind === "single"
+                    ? `Script uploaded (${data.sceneCount} scenes)`
+                    : `Episode ${epNum} uploaded (${data.sceneCount} scenes)`
+                  : kind === "single"
+                    ? "Script uploaded"
+                    : `Episode ${epNum} uploaded`,
                 { id: progress }
               );
             } else {
@@ -241,7 +252,10 @@ export default function NewProjectPage() {
                 },
                 `Failed to add ${scriptTitle}`
               );
-              toast.success(`Episode ${epNum} uploaded`, { id: progress });
+              toast.success(
+                kind === "single" ? "Script saved" : `Episode ${epNum} uploaded`,
+                { id: progress }
+              );
             }
           } catch (e) {
             toast.dismiss(progress);
@@ -292,7 +306,7 @@ export default function NewProjectPage() {
           {kind === null
             ? "Start with the shape of the project — one script, or a series block."
             : kind === "single"
-              ? "Name the project, then upload or paste the script inside the workspace."
+              ? "Name the project and optionally upload or paste the script now."
               : "Name the series block and add episodes now, or leave them empty and upload later."}
         </p>
 
@@ -356,37 +370,41 @@ export default function NewProjectPage() {
                 />
               </div>
 
-              {kind === "series" ? (
+              {kind === "series" || kind === "single" ? (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label>Scripts / episodes</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() =>
-                        setDrafts((prev) => {
-                          const maxEp = Math.max(
-                            0,
-                            ...prev.map((d) => d.episodeNumber || 0)
-                          );
-                          const next = maxEp + 1;
-                          return [
-                            ...prev,
-                            {
-                              ...emptyDraft(prev.length),
-                              episodeNumber: next,
-                              title: `Episode ${next}`,
-                            },
-                          ];
-                        })
-                      }
-                    >
-                      <Plus className="size-3.5" />
-                      Add episode
-                    </Button>
-                  </div>
+                  {kind === "series" ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Scripts / episodes</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() =>
+                          setDrafts((prev) => {
+                            const maxEp = Math.max(
+                              0,
+                              ...prev.map((d) => d.episodeNumber || 0)
+                            );
+                            const next = maxEp + 1;
+                            return [
+                              ...prev,
+                              {
+                                ...emptyDraft(prev.length),
+                                episodeNumber: next,
+                                title: `Episode ${next}`,
+                              },
+                            ];
+                          })
+                        }
+                      >
+                        <Plus className="size-3.5" />
+                        Add episode
+                      </Button>
+                    </div>
+                  ) : (
+                    <Label>Script (optional)</Label>
+                  )}
 
                   {drafts.map((d, i) => (
                     <div
@@ -395,42 +413,47 @@ export default function NewProjectPage() {
                     >
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1 space-y-3">
-                          <div className="space-y-2">
-                            <Label htmlFor={`ep-num-${d.key}`} className="text-xs">
-                              Episode number
-                            </Label>
-                            <Input
-                              id={`ep-num-${d.key}`}
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={d.episodeNumber}
-                              onChange={(e) => {
-                                const n = Number(e.target.value);
-                                updateDraft(d.key, {
-                                  episodeNumber: Number.isFinite(n)
-                                    ? n
-                                    : d.episodeNumber,
-                                  title:
-                                    d.title === `Episode ${d.episodeNumber}` ||
-                                    d.title === `Episode ${i + 1}`
-                                      ? `Episode ${
-                                          Number.isFinite(n) && n >= 1
-                                            ? Math.floor(n)
-                                            : d.episodeNumber
-                                        }`
-                                      : d.title,
-                                });
-                              }}
-                              className="w-28"
-                            />
-                          </div>
+                          {kind === "series" ? (
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor={`ep-num-${d.key}`}
+                                className="text-xs"
+                              >
+                                Episode number
+                              </Label>
+                              <Input
+                                id={`ep-num-${d.key}`}
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={d.episodeNumber}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  updateDraft(d.key, {
+                                    episodeNumber: Number.isFinite(n)
+                                      ? n
+                                      : d.episodeNumber,
+                                    title:
+                                      d.title === `Episode ${d.episodeNumber}` ||
+                                      d.title === `Episode ${i + 1}`
+                                        ? `Episode ${
+                                            Number.isFinite(n) && n >= 1
+                                              ? Math.floor(n)
+                                              : d.episodeNumber
+                                          }`
+                                        : d.title,
+                                  });
+                                }}
+                                className="w-28"
+                              />
+                            </div>
+                          ) : null}
                           <div className="space-y-2">
                             <Label
                               htmlFor={`ep-title-${d.key}`}
                               className="text-xs"
                             >
-                              Episode title
+                              {kind === "single" ? "Script title" : "Episode title"}
                             </Label>
                             <Input
                               id={`ep-title-${d.key}`}
@@ -438,11 +461,15 @@ export default function NewProjectPage() {
                               onChange={(e) =>
                                 updateDraft(d.key, { title: e.target.value })
                               }
-                              placeholder={`Episode ${d.episodeNumber || i + 1}`}
+                              placeholder={
+                                kind === "single"
+                                  ? title.trim() || "Uses project title if blank"
+                                  : `Episode ${d.episodeNumber || i + 1}`
+                              }
                             />
                           </div>
                         </div>
-                        {drafts.length > 1 ? (
+                        {kind === "series" && drafts.length > 1 ? (
                           <Button
                             type="button"
                             variant="ghost"
@@ -498,7 +525,9 @@ export default function NewProjectPage() {
                               updateDraft(d.key, {
                                 file: f,
                                 title:
-                                  d.title.startsWith("Episode ") && f
+                                  (!d.title.trim() ||
+                                    d.title.startsWith("Episode ")) &&
+                                  f
                                     ? f.name.replace(/\.pdf$/i, "")
                                     : d.title,
                               });
@@ -511,7 +540,11 @@ export default function NewProjectPage() {
                           onChange={(e) =>
                             updateDraft(d.key, { text: e.target.value })
                           }
-                          placeholder="Paste episode script text…"
+                          placeholder={
+                            kind === "single"
+                              ? "Paste script text…"
+                              : "Paste episode script text…"
+                          }
                           className="min-h-40 font-mono text-xs"
                         />
                       )}
