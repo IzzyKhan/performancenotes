@@ -445,10 +445,8 @@ function InstinctCanvasInner({
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingUploadType, setPendingUploadType] = useState<
-    "image" | "audio" | null
-  >(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   // Stable callbacks so flow node `data` identity doesn't churn every render
   const onUpdateRef = useRef<(id: string, patch: Partial<CanvasNode>) => void>(
@@ -747,18 +745,18 @@ function InstinctCanvasInner({
     };
   }, [projectId, sceneId]);
 
-  const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const type = pendingUploadType;
+  const onImagesPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    setPendingUploadType(null);
     e.target.value = "";
-    if (!type || files.length === 0) return;
-
-    // Images support multi-select; audio stays one-at-a-time.
-    const toUpload = type === "image" ? files : files.slice(0, 1);
-    for (const file of toUpload) {
-      await uploadFile(file, type);
+    for (const file of files) {
+      await uploadFile(file, "image");
     }
+  };
+
+  const onAudioPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) await uploadFile(file, "audio");
   };
 
   const empty = canvasNodes.length === 0;
@@ -820,19 +818,13 @@ function InstinctCanvasInner({
               Text note
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => {
-                setPendingUploadType("image");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => imageInputRef.current?.click()}
             >
               <ImageIcon className="size-4" />
               Image
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => {
-                setPendingUploadType("audio");
-                fileInputRef.current?.click();
-              }}
+              onClick={() => audioInputRef.current?.click()}
             >
               <Mic className="size-4" />
               Audio
@@ -857,18 +849,19 @@ function InstinctCanvasInner({
           </DropdownMenuContent>
         </DropdownMenu>
         <input
-          ref={fileInputRef}
+          ref={imageInputRef}
           type="file"
           className="hidden"
-          multiple={pendingUploadType === "image"}
-          accept={
-            pendingUploadType === "audio"
-              ? "audio/*"
-              : pendingUploadType === "image"
-                ? "image/jpeg,image/png,image/gif,image/webp"
-                : "*/*"
-          }
-          onChange={onFilePicked}
+          multiple
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          onChange={onImagesPicked}
+        />
+        <input
+          ref={audioInputRef}
+          type="file"
+          className="hidden"
+          accept="audio/*"
+          onChange={onAudioPicked}
         />
       </div>
 
