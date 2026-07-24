@@ -361,14 +361,25 @@ function SheetPage({
 }) {
   const { sceneHeading, content } = section;
   const rows = buildTableRows(content);
+  const hasSheet = rows.length > 0 || Boolean(content.notes);
+  const isPackOnly = !hasSheet && section.canvasNodes.length > 0;
 
   return (
     <Page size="A4" orientation="landscape" style={styles.page}>
       <SectionHeader
         title={title}
         sceneHeading={sceneHeading}
-        sectionLabel="Cheat sheet"
+        sectionLabel={isPackOnly ? "Reference pack" : "Cheat sheet"}
       />
+
+      {isPackOnly ? (
+        <View style={styles.notes}>
+          <Text style={styles.notesLabel}>Instinct references</Text>
+          <Text style={styles.notesText}>
+            Canvas materials for this scene follow on the next pages.
+          </Text>
+        </View>
+      ) : null}
 
       {content.notes ? (
         <View style={styles.notes}>
@@ -377,6 +388,7 @@ function SheetPage({
         </View>
       ) : null}
 
+      {rows.length > 0 ? (
       <View style={styles.table}>
         <View style={styles.headerRow} fixed>
           <HeaderCell width={COL.beat}>Beat</HeaderCell>
@@ -435,6 +447,7 @@ function SheetPage({
           </View>
         ))}
       </View>
+      ) : null}
 
       <PageFooter />
     </Page>
@@ -779,6 +792,8 @@ export async function GET(request: Request) {
   const scope = searchParams.get("scope");
   const format = searchParams.get("format");
   const includeCanvas = parseIncludeCanvas(searchParams.get("includeCanvas"));
+  /** pack = canvas/reference export without requiring cheat sheets */
+  const mode = searchParams.get("mode") === "pack" ? "pack" : "sheet";
   const order =
     searchParams.get("order") === "shoot" ? ("shoot" as const) : ("script" as const);
 
@@ -796,9 +811,24 @@ export async function GET(request: Request) {
       project.title,
       format === "zip",
       includeCanvas,
-      order
+      order,
+      mode
     );
   }
+
+  const projectScripts = listScriptsForProject(projectId);
+  const multiScript = projectScripts.length > 1;
+  const sceneRow = sceneId
+    ? db.select().from(scenes).where(eq(scenes.id, sceneId)).get()
+    : db.select().from(scenes).where(eq(scenes.projectId, projectId)).get();
+  const scene = sceneRow ? mapScene(sceneRow) : null;
+  const sceneScript = scene
+    ? projectScripts.find((s) => s.id === scene.scriptId) ?? null
+    : null;
+  const activeSceneId = scene?.id ?? sceneId;
+  const canvas = includeCanvas
+    ? toExportNodes(loadSceneCanvasNodes(projectId, activeSceneId))
+    : [];
 
   const cheatRow = db
     .select()
@@ -812,28 +842,26 @@ export async function GET(request: Request) {
         : and(eq(cheatSheets.projectId, projectId), isNull(cheatSheets.sceneId))
     )
     .get();
-  if (!cheatRow) {
+
+  if (mode === "sheet" && !cheatRow) {
     return NextResponse.json(
       { error: "No cheat sheet to export" },
       { status: 404 }
     );
   }
 
-  const cheatSheet = mapCheatSheet(cheatRow);
-  const sceneRow = sceneId
-    ? db.select().from(scenes).where(eq(scenes.id, sceneId)).get()
-    : db.select().from(scenes).where(eq(scenes.projectId, projectId)).get();
-  const scene = sceneRow ? mapScene(sceneRow) : null;
-  const projectScripts = listScriptsForProject(projectId);
-  const multiScript = projectScripts.length > 1;
-  const sceneScript = scene
-    ? projectScripts.find((s) => s.id === scene.scriptId) ?? null
-    : null;
-  const activeSceneId = scene?.id ?? sceneId;
-  const canvas = includeCanvas
-    ? toExportNodes(loadSceneCanvasNodes(projectId, activeSceneId))
-    : [];
+  if (mode === "pack" && !cheatRow && canvas.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Nothing to export for this scene yet — add references on the canvas first.",
+      },
+      { status: 404 }
+    );
+  }
 
+  const emptyContent: CheatSheetContent = { beats: [] };
+  const cheatSheet = cheatRow ? mapCheatSheet(cheatRow) : null;
   const heading = scene
     ? sceneSlugLabel(scene, sceneScript, multiScript)
     : null;
@@ -844,15 +872,17 @@ export async function GET(request: Request) {
       sections={[
         {
           sceneHeading: heading,
-          content: cheatSheet.content,
-          version: cheatSheet.version,
+          content: cheatSheet?.content ?? emptyContent,
+          version: cheatSheet?.version ?? 1,
           canvasNodes: canvas,
         },
       ]}
     />
   );
 
-  const filename = `${slugify(project.title, heading)}-cheat-sheet.pdf`;
+  const filename = `${slugify(project.title, heading)}-${
+    mode === "pack" ? "pack" : "cheat-sheet"
+  }.pdf`;
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
@@ -867,7 +897,8 @@ async function exportAll(
   title: string,
   asZip: boolean,
   includeCanvas: boolean,
-  order: "script" | "shoot"
+  order: "script" | "shoot",
+  mode: "pack" | "sheet" = "sheet"
 ) {
   const projectScripts = listScriptsForProject(projectId);
   const multiScript = projectScripts.length > 1;
@@ -893,52 +924,80 @@ async function exportAll(
       : sceneSlugLabel(scene, script, multiScript);
   };
 
+  const emptyContent: CheatSheetContent = { beats: [] };
   const sectionMeta: { scene: Scene | null; label: string }[] = [];
   const sections: SheetSection[] = [];
-  const legacy = allSheets.find((cs) => cs.sceneId === null);
-  if (
-    legacy &&
-    !allScenes.some((s) => allSheets.some((cs) => cs.sceneId === s.id))
-  ) {
-    const first = allScenes[0] ?? null;
-    const label = first ? labelFor(first) : "Scene";
-    sectionMeta.push({ scene: first, label });
-    sections.push({
-      sceneHeading: label,
-      content: legacy.content,
-      version: legacy.version,
-      canvasNodes: includeCanvas
-        ? toExportNodes(loadSceneCanvasNodes(projectId, first?.id ?? null))
-        : [],
-    });
-  }
-  for (const scene of allScenes) {
-    const sheet = allSheets.find((cs) => cs.sceneId === scene.id);
-    if (!sheet) continue;
-    const label = labelFor(scene);
-    sectionMeta.push({ scene, label });
-    sections.push({
-      sceneHeading: label,
-      content: sheet.content,
-      version: sheet.version,
-      canvasNodes: includeCanvas
+
+  if (mode === "sheet") {
+    const legacy = allSheets.find((cs) => cs.sceneId === null);
+    if (
+      legacy &&
+      !allScenes.some((s) => allSheets.some((cs) => cs.sceneId === s.id))
+    ) {
+      const first = allScenes[0] ?? null;
+      const label = first ? labelFor(first) : "Scene";
+      sectionMeta.push({ scene: first, label });
+      sections.push({
+        sceneHeading: label,
+        content: legacy.content,
+        version: legacy.version,
+        canvasNodes: includeCanvas
+          ? toExportNodes(loadSceneCanvasNodes(projectId, first?.id ?? null))
+          : [],
+      });
+    }
+    for (const scene of allScenes) {
+      const sheet = allSheets.find((cs) => cs.sceneId === scene.id);
+      if (!sheet) continue;
+      const label = labelFor(scene);
+      sectionMeta.push({ scene, label });
+      sections.push({
+        sceneHeading: label,
+        content: sheet.content,
+        version: sheet.version,
+        canvasNodes: includeCanvas
+          ? toExportNodes(loadSceneCanvasNodes(projectId, scene.id))
+          : [],
+      });
+    }
+  } else {
+    // pack mode: one section per scene that has canvas materials (and/or a sheet)
+    for (const scene of allScenes) {
+      const sheet = allSheets.find((cs) => cs.sceneId === scene.id);
+      const canvas = includeCanvas
         ? toExportNodes(loadSceneCanvasNodes(projectId, scene.id))
-        : [],
-    });
+        : [];
+      if (!sheet && canvas.length === 0) continue;
+      const label = labelFor(scene);
+      sectionMeta.push({ scene, label });
+      sections.push({
+        sceneHeading: label,
+        content: sheet?.content ?? emptyContent,
+        version: sheet?.version ?? 1,
+        canvasNodes: canvas,
+      });
+    }
   }
 
   if (sections.length === 0) {
     return NextResponse.json(
-      { error: "No cheat sheets to export yet" },
+      {
+        error:
+          mode === "pack"
+            ? "Nothing to export yet — add canvas references to your scenes first."
+            : "No cheat sheets to export yet",
+      },
       { status: 404 }
     );
   }
+
+  const fileStem = mode === "pack" ? "scene-packs" : "cheat-sheets";
 
   if (!asZip) {
     const buffer = await renderToBuffer(
       <CheatSheetDocument title={title} sections={sections} />
     );
-    const filename = `${slugify(title)}-cheat-sheets${
+    const filename = `${slugify(title)}-${fileStem}${
       order === "shoot" ? "-shoot-order" : ""
     }.pdf`;
     return new NextResponse(new Uint8Array(buffer), {
@@ -961,28 +1020,29 @@ async function exportAll(
       : undefined;
     const epPrefix =
       multiScript && script ? `${scriptShortLabel(script).toLowerCase()}-` : "";
+    const suffix = mode === "pack" ? "pack" : "cheat-sheet";
     let name: string;
     if (order === "shoot" && meta?.scene?.shootDay != null) {
       name = `D${String(meta.scene.shootDay).padStart(2, "0")}-${String(
         meta.scene.shootOrder ?? i + 1
-      ).padStart(2, "0")}-${epPrefix}${slugify(meta.scene.heading)}-cheat-sheet.pdf`;
+      ).padStart(2, "0")}-${epPrefix}${slugify(meta.scene.heading)}-${suffix}.pdf`;
     } else if (order === "shoot") {
       name = `unscheduled-${epPrefix}${String(
         (meta?.scene?.orderIndex ?? i) + 1
       ).padStart(2, "0")}-${slugify(
         meta?.scene?.heading ?? s.sceneHeading ?? "scene"
-      )}-cheat-sheet.pdf`;
+      )}-${suffix}.pdf`;
     } else {
       name = `${epPrefix}${String(
         (meta?.scene?.orderIndex ?? i) + 1
       ).padStart(2, "0")}-${slugify(
         meta?.scene?.heading ?? s.sceneHeading ?? "scene"
-      )}-cheat-sheet.pdf`;
+      )}-${suffix}.pdf`;
     }
     zip.file(name, buffer);
   }
   const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-  const filename = `${slugify(title)}-cheat-sheets${
+  const filename = `${slugify(title)}-${fileStem}${
     order === "shoot" ? "-shoot-order" : ""
   }.zip`;
   return new NextResponse(new Uint8Array(zipBuffer), {

@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Performance Notes",
   description:
-    "AI-native performance notes for directors — scene, instinct canvas, and playable cheat sheets.",
+    "Organize script scenes, instinct references, and shoot days — export scene packs for set.",
 };
 
 export default function RootLayout({

@@ -1,9 +1,16 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, sqlite } from "@/db";
-import { cheatSheets, scenes, scripts } from "@/db/schema";
+import {
+  canvasNodes,
+  chatMessages,
+  cheatSheets,
+  scenes,
+  scripts,
+} from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { mapScene, mapScript } from "@/lib/mappers";
 import { parseScreenplayText, splitScenes } from "@/lib/screenplay";
+import { diffScriptScenes, type SceneDiffEntry } from "@/lib/script-diff";
 import type { Scene, Script, SceneSourceType } from "@/types";
 
 export type ScriptCreateResult = {
@@ -198,6 +205,144 @@ export function replaceScriptScenes(opts: {
   return sceneRows.length;
 }
 
+export type RemapTransferMap = Record<string, boolean>;
+
+function reassignSceneScopedData(oldId: string, newId: string) {
+  db.update(canvasNodes)
+    .set({ sceneId: newId })
+    .where(eq(canvasNodes.sceneId, oldId))
+    .run();
+  db.update(chatMessages)
+    .set({ sceneId: newId })
+    .where(eq(chatMessages.sceneId, oldId))
+    .run();
+  db.update(cheatSheets)
+    .set({ sceneId: newId })
+    .where(eq(cheatSheets.sceneId, oldId))
+    .run();
+}
+
+function deleteSceneScopedData(sceneId: string) {
+  db.delete(canvasNodes).where(eq(canvasNodes.sceneId, sceneId)).run();
+  db.delete(chatMessages).where(eq(chatMessages.sceneId, sceneId)).run();
+  db.delete(cheatSheets).where(eq(cheatSheets.sceneId, sceneId)).run();
+}
+
+/**
+ * Preview a script revision: parse new PDF text and diff against current scenes.
+ * Does not write to the database.
+ */
+export function previewScriptReplace(opts: {
+  projectId: string;
+  scriptId: string;
+  rawText: string;
+}): { diff: SceneDiffEntry[]; newSceneCount: number } {
+  const oldScenes = db
+    .select()
+    .from(scenes)
+    .where(
+      and(
+        eq(scenes.projectId, opts.projectId),
+        eq(scenes.scriptId, opts.scriptId)
+      )
+    )
+    .all()
+    .map(mapScene);
+
+  const parts = splitScenes(opts.rawText.trim());
+  return {
+    diff: diffScriptScenes(oldScenes, parts),
+    newSceneCount: parts.length,
+  };
+}
+
+/**
+ * Replace episode scenes from a revision, remapping canvas / chat / cheat sheets
+ * for matched scenes the user chose to transfer.
+ */
+export function replaceScriptScenesWithRemap(opts: {
+  projectId: string;
+  scriptId: string;
+  rawText: string;
+  sourceType: SceneSourceType;
+  /** oldSceneId -> whether to transfer prep onto the matched new scene */
+  transfers: RemapTransferMap;
+}): { sceneCount: number; transferred: number } {
+  const now = nowIso();
+  const parts = splitScenes(opts.rawText.trim());
+  const oldScenes = db
+    .select()
+    .from(scenes)
+    .where(
+      and(
+        eq(scenes.projectId, opts.projectId),
+        eq(scenes.scriptId, opts.scriptId)
+      )
+    )
+    .all()
+    .map(mapScene);
+
+  const diff = diffScriptScenes(oldScenes, parts);
+  let transferred = 0;
+
+  sqlite.transaction(() => {
+    const oldIds = oldScenes.map((s) => s.id);
+    const remappedOldIds = new Set<string>();
+
+    // Insert new scenes; remap matched transfers before deleting olds
+    for (const entry of diff) {
+      if (!entry.newScene) continue;
+      const newId = createId("scene");
+      const old = entry.oldScene;
+      const shouldTransfer =
+        Boolean(old) &&
+        (entry.status === "unchanged" || entry.status === "changed") &&
+        (opts.transfers[old!.id] ?? entry.transferDefault);
+
+      db.insert(scenes)
+        .values({
+          id: newId,
+          projectId: opts.projectId,
+          scriptId: opts.scriptId,
+          heading: entry.newScene.heading,
+          orderIndex: entry.newScene.orderIndex,
+          sceneNumber: entry.newScene.sceneNumber,
+          shootDay: shouldTransfer ? (old?.shootDay ?? null) : null,
+          shootOrder: shouldTransfer ? (old?.shootOrder ?? null) : null,
+          rawText: entry.newScene.rawText,
+          sourceType: opts.sourceType,
+          parsedMeta: null,
+          createdAt: now,
+        })
+        .run();
+
+      if (shouldTransfer && old) {
+        reassignSceneScopedData(old.id, newId);
+        remappedOldIds.add(old.id);
+        transferred += 1;
+      }
+    }
+
+    // Drop prep for old scenes that were not remapped (removed / declined)
+    for (const id of oldIds) {
+      if (!remappedOldIds.has(id)) {
+        deleteSceneScopedData(id);
+      }
+    }
+
+    if (oldIds.length > 0) {
+      db.delete(scenes).where(inArray(scenes.id, oldIds)).run();
+    }
+
+    db.update(scripts)
+      .set({ sourceType: opts.sourceType })
+      .where(eq(scripts.id, opts.scriptId))
+      .run();
+  })();
+
+  return { sceneCount: parts.length, transferred };
+}
+
 export function deleteScriptAndScenes(scriptId: string) {
   const sceneRows = db
     .select()
@@ -207,6 +352,8 @@ export function deleteScriptAndScenes(scriptId: string) {
   const sceneIds = sceneRows.map((s) => s.id);
   if (sceneIds.length > 0) {
     db.delete(cheatSheets).where(inArray(cheatSheets.sceneId, sceneIds)).run();
+    db.delete(canvasNodes).where(inArray(canvasNodes.sceneId, sceneIds)).run();
+    db.delete(chatMessages).where(inArray(chatMessages.sceneId, sceneIds)).run();
   }
   db.delete(scenes).where(eq(scenes.scriptId, scriptId)).run();
   db.delete(scripts).where(eq(scripts.id, scriptId)).run();

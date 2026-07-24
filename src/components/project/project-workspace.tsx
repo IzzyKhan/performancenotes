@@ -20,14 +20,17 @@ import { AgentChat, type AgentChatHandle } from "@/components/chat/agent-chat";
 import { CheatSheetPanel } from "@/components/cheatsheet/cheat-sheet-panel";
 import { ScenePanel } from "@/components/scene/scene-panel";
 import { ShootScheduleDialog } from "@/components/schedule/shoot-schedule-dialog";
+import { ExportMenu } from "@/components/project/export-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { CheatSheet, ProjectBundle, Scene, Script } from "@/types";
 import { cn } from "@/lib/utils";
+import { isAgentEnabled } from "@/lib/features";
 import { sceneSlugLabel } from "@/lib/schedule";
 
 const LEFT_PANEL_MIN = 280;
 const RIGHT_PANEL_MIN = 320;
 const PANEL_MAX_RATIO = 0.5;
+const AGENT_ENABLED = isAgentEnabled();
 
 export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   const [scripts, setScripts] = useState<Script[]>(bundle.scripts);
@@ -42,10 +45,14 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
     bundle.cheatSheets
   );
   const [rightTab, setRightTab] = useState<"agent" | "sheet">(
-    bundle.cheatSheets.length > 0 ? "sheet" : "agent"
+    AGENT_ENABLED
+      ? bundle.cheatSheets.length > 0
+        ? "sheet"
+        : "agent"
+      : "sheet"
   );
   const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(AGENT_ENABLED);
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightWidth, setRightWidth] = useState(380);
   const [layoutWidth, setLayoutWidth] = useState(0);
@@ -273,6 +280,14 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               onScenesChange={handleScenesChange}
             />
           ) : null}
+          {scenes.length > 0 ? (
+            <ExportMenu
+              projectId={bundle.project.id}
+              sceneId={activeSceneId}
+              hasMultipleScenes={scenes.length > 1}
+              variant="ghost"
+            />
+          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -288,21 +303,23 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             )}
             <span className="hidden sm:inline">Scene</span>
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-xs text-muted-foreground"
-            onClick={() => setRightOpen((v) => !v)}
-            title={rightOpen ? "Hide agent panel" : "Show agent panel"}
-          >
-            <span className="hidden sm:inline">Agent</span>
-            {rightOpen ? (
-              <PanelRightClose className="size-4" />
-            ) : (
-              <PanelRightOpen className="size-4" />
-            )}
-          </Button>
+          {AGENT_ENABLED ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setRightOpen((v) => !v)}
+              title={rightOpen ? "Hide agent panel" : "Show agent panel"}
+            >
+              <span className="hidden sm:inline">Agent</span>
+              {rightOpen ? (
+                <PanelRightClose className="size-4" />
+              ) : (
+                <PanelRightOpen className="size-4" />
+              )}
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -385,7 +402,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             )}
           />
         </main>
-        {rightOpen ? (
+        {AGENT_ENABLED && rightOpen ? (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -421,8 +438,8 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
           </div>
         ) : null}
 
-        {/* Agent / Cheat sheet pane */}
-        {rightOpen ? (
+        {/* Agent / Cheat sheet pane — only when dramaturg feature is on */}
+        {AGENT_ENABLED && rightOpen ? (
           <aside
             className={cn(
               "min-h-[36vh] overflow-hidden border-t border-border print:border-0 md:h-full md:min-h-0 md:shrink-0 md:border-t-0"

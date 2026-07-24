@@ -29,9 +29,13 @@ import {
   listScenesForProject,
   listScriptsForProject,
 } from "@/lib/scripts";
+import { isAgentEnabled } from "@/lib/features";
 import type { CheatSheetContent, Script } from "@/types";
 
 export const runtime = "nodejs";
+
+const AGENT_DISABLED_MSG =
+  "The dramaturg agent is turned off on this deployment. Set NEXT_PUBLIC_ENABLE_AGENT=true to enable it.";
 
 const CHEAT_SHEET_TOOL: Anthropic.Tool = {
   name: "save_cheat_sheet",
@@ -111,6 +115,9 @@ const CHEAT_SHEET_TOOL: Anthropic.Tool = {
 };
 
 export async function GET(request: Request) {
+  if (!isAgentEnabled()) {
+    return NextResponse.json({ error: AGENT_DISABLED_MSG }, { status: 403 });
+  }
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   const sceneId = searchParams.get("sceneId");
@@ -136,6 +143,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!isAgentEnabled()) {
+    return NextResponse.json({ error: AGENT_DISABLED_MSG }, { status: 403 });
+  }
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
       {

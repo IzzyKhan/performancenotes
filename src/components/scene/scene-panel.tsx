@@ -19,6 +19,8 @@ import { fileWithSafeName } from "@/lib/multipart";
 import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { ScreenplayView } from "@/components/scene/screenplay-view";
 import { AddScriptDialog } from "@/components/project/add-script-dialog";
+import { ReplaceScriptDialog } from "@/components/project/replace-script-dialog";
+import type { SceneDiffEntry } from "@/lib/script-diff";
 import { sceneSlugLabel } from "@/lib/schedule";
 
 export function ScenePanel({
@@ -51,6 +53,11 @@ export function ScenePanel({
   const [text, setText] = useState(activeScene?.rawText ?? "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [pendingReplace, setPendingReplace] = useState<{
+    file: File;
+    diff: SceneDiffEntry[];
+  } | null>(null);
+  const [applyingReplace, setApplyingReplace] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -145,16 +152,6 @@ export function ScenePanel({
   }
 
   async function uploadPdf(file: File) {
-    if (activeScriptId && scriptScenes.length > 0) {
-      if (
-        !confirm(
-          "Replacing this episode’s script removes its scenes and per-scene cheat sheets. Other episodes are kept. Continue?"
-        )
-      ) {
-        return;
-      }
-    }
-
     if (!activeScriptId) {
       toast.error("Add an episode first, then replace its PDF");
       return;
@@ -163,6 +160,25 @@ export function ScenePanel({
     setUploading(true);
     try {
       const snapshot = await snapshotFile(file);
+
+      // Existing scenes → preview diff and let the user choose remaps
+      if (scriptScenes.length > 0) {
+        const form = new FormData();
+        form.append("projectId", projectId);
+        form.append("scriptId", activeScriptId);
+        form.append("mode", "preview");
+        form.append("file", fileWithSafeName(snapshot));
+        const data = (await postWithRetry("/api/scenes", form, {
+          label: "PDF preview",
+          timeoutMs: 180_000,
+        })) as { diff?: SceneDiffEntry[]; error?: string };
+        if (!Array.isArray(data.diff)) {
+          throw new Error("Could not compare script revision");
+        }
+        setPendingReplace({ file: snapshot, diff: data.diff });
+        return;
+      }
+
       const form = new FormData();
       form.append("projectId", projectId);
       form.append("scriptId", activeScriptId);
@@ -184,11 +200,54 @@ export function ScenePanel({
     }
   }
 
+  async function applyReplace(transfers: Record<string, boolean>) {
+    if (!pendingReplace || !activeScriptId) return;
+    setApplyingReplace(true);
+    try {
+      const form = new FormData();
+      form.append("projectId", projectId);
+      form.append("scriptId", activeScriptId);
+      form.append("transfers", JSON.stringify(transfers));
+      form.append("file", fileWithSafeName(pendingReplace.file));
+      const data = (await postWithRetry("/api/scenes", form, {
+        label: "PDF replace",
+        timeoutMs: 180_000,
+      })) as { sceneCount?: number; transferred?: number };
+      setPendingReplace(null);
+      await syncProjectData(activeScriptId);
+      const n = data.sceneCount;
+      const t = data.transferred;
+      toast.success(
+        typeof n === "number"
+          ? typeof t === "number"
+            ? `Revision applied — ${n} scenes, ${t} kept prep`
+            : `Revision applied — ${n} scenes`
+          : "Revision applied"
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to apply revision");
+    } finally {
+      setApplyingReplace(false);
+    }
+  }
+
   const showEpisodePicker = scripts.length > 1;
   const showScenePicker = scriptScenes.length > 1;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {pendingReplace ? (
+        <ReplaceScriptDialog
+          key={`${pendingReplace.file.name}-${pendingReplace.file.size}-${pendingReplace.diff.length}`}
+          open
+          onOpenChange={(open) => {
+            if (!open && !applyingReplace) setPendingReplace(null);
+          }}
+          diff={pendingReplace.diff}
+          applying={applyingReplace}
+          onConfirm={(transfers) => void applyReplace(transfers)}
+        />
+      ) : null}
       {showEpisodePicker || showScenePicker ? (
         <div className="shrink-0 space-y-2 border-b border-border px-3 py-2">
           {showEpisodePicker ? (

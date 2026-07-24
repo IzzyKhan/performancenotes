@@ -63,11 +63,11 @@ export default function HomePage() {
               </span>
             </div>
             <h1 className="text-[28px] font-medium tracking-tight text-foreground">
-              Direct with playable notes
+              Organize inspiration for set
             </h1>
             <p className="mt-2 max-w-md text-sm font-normal leading-relaxed text-muted-foreground">
-              Upload a scene, riff on an instinct canvas, and distill clear
-              objectives and action verbs your actors can use on set.
+              Upload a script, pin references to each scene, schedule shoot
+              days, and export packs ordered for the day.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

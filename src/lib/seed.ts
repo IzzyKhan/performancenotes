@@ -179,7 +179,7 @@ function insertDemoProject(userId: string | null) {
       projectId,
       role: "assistant",
       content:
-        "Welcome. I've loaded a demo scene — a midnight kitchen confrontation between Mara and Jules. Your instinct layer already has a few notes. Ask me about a beat, or hit **Distill cheat sheet** when you're ready to lock performance notes for set.",
+        "Welcome. I've loaded a demo scene — a midnight kitchen confrontation between Mara and Jules. Drop references on the instinct canvas for each scene, then use Shoot schedule and Export to build day packs for set.",
       createdAt: now,
     })
     .run();

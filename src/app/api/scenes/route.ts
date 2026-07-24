@@ -10,7 +10,10 @@ import { parseScreenplayText } from "@/lib/screenplay";
 import {
   createScriptWithScenes,
   listScenesForProject,
+  previewScriptReplace,
   replaceScriptScenes,
+  replaceScriptScenesWithRemap,
+  type RemapTransferMap,
 } from "@/lib/scripts";
 
 export const runtime = "nodejs";
@@ -29,9 +32,32 @@ export async function GET(request: Request) {
   return NextResponse.json(listScenesForProject(projectId));
 }
 
+function parseTransfers(raw: unknown): RemapTransferMap | null {
+  if (raw == null || raw === "") return null;
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: RemapTransferMap = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = Boolean(v);
+  }
+  return out;
+}
+
 /**
  * Upload or paste a script for one episode. Replaces scenes under that
  * script only. If scriptId is omitted, creates a new script on the project.
+ *
+ * Replace modes (when scriptId is set):
+ * - mode=preview — extract + diff only, no DB write
+ * - transfers JSON — apply remap (canvas/chat/cheat/schedule for matched scenes)
+ * - otherwise — wipe-and-replace (legacy; used for empty episodes / typed paste)
  */
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") || "";
@@ -41,6 +67,8 @@ export async function POST(request: Request) {
   let title: string = "";
   let rawText: string;
   let sourceType: "pdf" | "typed";
+  let mode: string | null = null;
+  let transfers: RemapTransferMap | null = null;
 
   if (contentType.includes("multipart/form-data")) {
     const formOrErr = await parseMultipartForm(request);
@@ -49,6 +77,8 @@ export async function POST(request: Request) {
     projectId = String(form.get("projectId") || "");
     scriptId = String(form.get("scriptId") || "") || null;
     title = String(form.get("title") || "").trim();
+    mode = String(form.get("mode") || "") || null;
+    transfers = parseTransfers(form.get("transfers"));
     const file = form.get("file");
 
     if (!projectId || !(file instanceof File)) {
@@ -82,6 +112,8 @@ export async function POST(request: Request) {
     title = typeof body.title === "string" ? body.title.trim() : "";
     rawText = (body.rawText as string)?.trim();
     sourceType = body.sourceType === "pdf" ? "pdf" : "typed";
+    mode = typeof body.mode === "string" ? body.mode : null;
+    transfers = parseTransfers(body.transfers);
 
     if (!projectId || !rawText) {
       return NextResponse.json(
@@ -104,6 +136,35 @@ export async function POST(request: Request) {
       .get();
     if (!script || script.projectId !== projectId) {
       return NextResponse.json({ error: "Script not found" }, { status: 404 });
+    }
+
+    if (mode === "preview") {
+      const preview = previewScriptReplace({
+        projectId,
+        scriptId,
+        rawText,
+      });
+      console.info(
+        `[api/scenes POST] Preview ${scriptId}: ${preview.newSceneCount} new scenes, ${Date.now() - saveStarted}ms`
+      );
+      return NextResponse.json(preview);
+    }
+
+    if (transfers) {
+      const result = replaceScriptScenesWithRemap({
+        projectId,
+        scriptId,
+        rawText,
+        sourceType,
+        transfers,
+      });
+      console.info(
+        `[api/scenes POST] Remapped ${scriptId}: ${result.sceneCount} scenes, ${result.transferred} transferred, ${Date.now() - saveStarted}ms`
+      );
+      return NextResponse.json(
+        { scriptId, sceneCount: result.sceneCount, transferred: result.transferred },
+        { status: 201 }
+      );
     }
 
     const sceneCount = replaceScriptScenes({
