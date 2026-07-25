@@ -40,7 +40,7 @@ Rules:
 - Break the scene into clear beats (typically 3–7).
 - For each beat, cover every major speaking character.
 - Objectives must be transitive and specific.
-- Actions must be transitive verbs an actor can play.
+- Actions must be transitive verbs an actor can play. For every action, give a primary verb plus 2 synonymous alternatives (same tactic, different tone) so the director can choose on set — e.g. provoke / bait / needle.
 - Adjustments should be "as if..." phrasing.
 - Pitfalls should warn against result-acting or telegraphing.
 - If a current cheat sheet exists, MERGE thoughtfully: keep what still works, revise what the conversation improved, add new beats if needed. Do not blindly clobber director hand-edits that still fit.

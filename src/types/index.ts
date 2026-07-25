@@ -71,7 +71,10 @@ export interface ChatMessage {
 }
 
 export interface ActionNote {
+  /** Primary transitive action verb. */
   verb: string;
+  /** 1–2 synonymous alternatives so the director can pick tone on set. */
+  synonyms: string[];
   moment: string;
 }
 

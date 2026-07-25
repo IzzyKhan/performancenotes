@@ -1,4 +1,5 @@
 import type {
+  ActionNote,
   BeatEntry,
   CanvasNode,
   CanvasNodeContent,
@@ -9,6 +10,7 @@ import type {
   Scene,
   Script,
 } from "@/types";
+import { normalizeActionNote } from "@/lib/action-verbs";
 
 export function mapScript(row: {
   id: string;
@@ -175,11 +177,8 @@ function normalizeCharacterNotes(raw: unknown): CharacterNotes | null {
     objective: typeof c.objective === "string" ? c.objective : "",
     obstacle: typeof c.obstacle === "string" ? c.obstacle : "",
     actions: actionsRaw
-      .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
-      .map((a) => ({
-        verb: typeof a.verb === "string" ? a.verb : "",
-        moment: typeof a.moment === "string" ? a.moment : "",
-      })),
+      .map((a) => normalizeActionNote(a))
+      .filter((a): a is ActionNote => a !== null),
     adjustments: typeof c.adjustments === "string" ? c.adjustments : "",
     pitfalls: typeof c.pitfalls === "string" ? c.pitfalls : "",
   };

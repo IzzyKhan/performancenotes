@@ -13,6 +13,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import path from "path";
 import { db } from "@/db";
 import { cheatSheets, scenes, canvasNodes } from "@/db/schema";
+import { formatActionLine } from "@/lib/action-verbs";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import { mapCanvasNode, mapCheatSheet, mapScene } from "@/lib/mappers";
 import { readImageAsBase64 } from "@/lib/media";
@@ -264,13 +265,9 @@ function buildTableRows(content: CheatSheetContent): TableRow[] {
     let firstInBeat = true;
     (beat.characters ?? []).forEach((ch) => {
       const actions =
-        ch.actions?.length > 0 ? ch.actions : [{ verb: "", moment: "" }];
+        ch.actions?.length > 0 ? ch.actions : [{ verb: "", synonyms: [], moment: "" }];
       actions.forEach((a, ai) => {
-        const actionText = a.verb
-          ? a.moment
-            ? `to ${a.verb} — ${a.moment}`
-            : `to ${a.verb}`
-          : "";
+        const actionText = formatActionLine(a);
         const isFirstForCharacter = ai === 0;
         rows.push({
           showBeat: firstInBeat,
@@ -796,6 +793,9 @@ export async function GET(request: Request) {
   const mode = searchParams.get("mode") === "pack" ? "pack" : "sheet";
   const order =
     searchParams.get("order") === "shoot" ? ("shoot" as const) : ("script" as const);
+  const sceneIds = parseSceneIds(searchParams.get("sceneIds"));
+  const disposition =
+    searchParams.get("disposition") === "inline" ? "inline" : "attachment";
 
   if (!projectId) {
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
@@ -805,14 +805,16 @@ export async function GET(request: Request) {
   if ("error" in access) return access.error;
   const { project } = access;
 
-  if (scope === "all") {
+  if (scope === "all" || (sceneIds && sceneIds.length > 0)) {
     return exportAll(
       projectId,
       project.title,
       format === "zip",
       includeCanvas,
       order,
-      mode
+      mode,
+      sceneIds,
+      disposition
     );
   }
 
@@ -887,9 +889,18 @@ export async function GET(request: Request) {
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `${disposition}; filename="${filename}"`,
     },
   });
+}
+
+function parseSceneIds(raw: string | null): string[] | null {
+  if (!raw?.trim()) return null;
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.length > 0 ? ids : null;
 }
 
 async function exportAll(
@@ -898,17 +909,23 @@ async function exportAll(
   asZip: boolean,
   includeCanvas: boolean,
   order: "script" | "shoot",
-  mode: "pack" | "sheet" = "sheet"
+  mode: "pack" | "sheet" = "sheet",
+  sceneIds: string[] | null = null,
+  disposition: "attachment" | "inline" = "attachment"
 ) {
   const projectScripts = listScriptsForProject(projectId);
   const multiScript = projectScripts.length > 1;
   const scriptsById = new Map(projectScripts.map((s) => [s.id, s]));
   const rawScenes = listScenesForProject(projectId);
+  const allowed = sceneIds ? new Set(sceneIds) : null;
 
-  const allScenes =
+  const ordered =
     order === "shoot"
       ? sortScenesByShootThenScript(rawScenes, projectScripts)
       : rawScenes;
+  const allScenes = allowed
+    ? ordered.filter((s) => allowed.has(s.id))
+    : ordered;
 
   const allSheets = db
     .select()
@@ -931,6 +948,7 @@ async function exportAll(
   if (mode === "sheet") {
     const legacy = allSheets.find((cs) => cs.sceneId === null);
     if (
+      !allowed &&
       legacy &&
       !allScenes.some((s) => allSheets.some((cs) => cs.sceneId === s.id))
     ) {
@@ -1003,7 +1021,7 @@ async function exportAll(
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `${disposition}; filename="${filename}"`,
       },
     });
   }

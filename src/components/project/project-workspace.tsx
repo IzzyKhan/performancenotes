@@ -283,8 +283,9 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
           {scenes.length > 0 ? (
             <ExportMenu
               projectId={bundle.project.id}
+              scripts={scripts}
+              scenes={scenes}
               sceneId={activeSceneId}
-              hasMultipleScenes={scenes.length > 1}
               variant="ghost"
             />
           ) : null}
@@ -506,6 +507,8 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
                 <CheatSheetPanel
                   projectId={bundle.project.id}
                   projectTitle={bundle.project.title}
+                  scripts={scripts}
+                  scenes={scenes}
                   sceneId={activeSceneId}
                   sceneHeading={
                     activeScene
@@ -517,7 +520,6 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
                       : null
                   }
                   cheatSheet={activeCheatSheet}
-                  hasMultipleScenes={scenes.length > 1}
                   onChange={upsertCheatSheet}
                 />
               </TabsContent>

@@ -76,14 +76,23 @@ const CHEAT_SHEET_TOOL: Anthropic.Tool = {
                       properties: {
                         verb: {
                           type: "string",
-                          description: "Transitive action verb",
+                          description:
+                            "Primary transitive action verb (e.g. provoke)",
+                        },
+                        synonyms: {
+                          type: "array",
+                          items: { type: "string" },
+                          description:
+                            "Exactly 2 synonymous alternatives with different tone (e.g. bait, needle)",
+                          minItems: 2,
+                          maxItems: 2,
                         },
                         moment: {
                           type: "string",
                           description: "Line or moment this action plays on",
                         },
                       },
-                      required: ["verb", "moment"],
+                      required: ["verb", "synonyms", "moment"],
                     },
                   },
                   adjustments: {
