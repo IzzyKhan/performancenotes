@@ -11,6 +11,11 @@ import { createId, nowIso } from "@/lib/id";
 import { mapScene, mapScript } from "@/lib/mappers";
 import { parseScreenplayText, splitScenes } from "@/lib/screenplay";
 import { diffScriptScenes, type SceneDiffEntry } from "@/lib/script-diff";
+import {
+  SLUG_ONLY_RAW_TEXT,
+  type SceneSlugPayload,
+  slugsToSplitScenes,
+} from "@/lib/scene-slug";
 import type { Scene, Script, SceneSourceType } from "@/types";
 
 export type ScriptCreateResult = {
@@ -87,6 +92,77 @@ export function nextEpisodeNumber(projectId: string): number {
     .all();
   if (rows.length === 0) return 1;
   return Math.max(...rows.map((r) => r.episodeNumber ?? r.orderIndex + 1)) + 1;
+}
+
+function sceneRowsFromSlugs(opts: {
+  projectId: string;
+  scriptId: string;
+  slugs: SceneSlugPayload[];
+  sourceType: SceneSourceType;
+  now: string;
+}) {
+  return opts.slugs.map((slug) => ({
+    id: createId("scene"),
+    projectId: opts.projectId,
+    scriptId: opts.scriptId,
+    heading: slug.heading,
+    orderIndex: slug.orderIndex,
+    sceneNumber: slug.sceneNumber,
+    rawText: SLUG_ONLY_RAW_TEXT,
+    sourceType: opts.sourceType,
+    parsedMeta: null as string | null,
+    createdAt: opts.now,
+  }));
+}
+
+export function createScriptWithSceneSlugs(opts: {
+  projectId: string;
+  title: string;
+  slugs: SceneSlugPayload[];
+  sourceType: SceneSourceType;
+  orderIndex?: number;
+  episodeNumber?: number;
+}): ScriptCreateResult {
+  const now = nowIso();
+  const scriptId = createId("script");
+  const orderIndex = opts.orderIndex ?? nextScriptOrderIndex(opts.projectId);
+  const episodeNumber =
+    typeof opts.episodeNumber === "number" && opts.episodeNumber >= 1
+      ? Math.floor(opts.episodeNumber)
+      : nextEpisodeNumber(opts.projectId);
+  const title = opts.title.trim() || `Episode ${episodeNumber}`;
+
+  const sceneRows = sceneRowsFromSlugs({
+    projectId: opts.projectId,
+    scriptId,
+    slugs: opts.slugs,
+    sourceType: opts.sourceType,
+    now,
+  });
+
+  sqlite.transaction(() => {
+    db.insert(scripts)
+      .values({
+        id: scriptId,
+        projectId: opts.projectId,
+        title,
+        orderIndex,
+        episodeNumber,
+        sourceType: opts.sourceType,
+        createdAt: now,
+      })
+      .run();
+
+    for (const row of sceneRows) {
+      db.insert(scenes).values(row).run();
+    }
+  })();
+
+  const script = mapScript(
+    db.select().from(scripts).where(eq(scripts.id, scriptId)).get()!
+  );
+
+  return { script, sceneCount: sceneRows.length };
 }
 
 export function createScriptWithScenes(opts: {
@@ -205,6 +281,60 @@ export function replaceScriptScenes(opts: {
   return sceneRows.length;
 }
 
+/** Replace all scenes under a script from slug payloads (no script bodies). */
+export function replaceScriptSceneSlugs(opts: {
+  projectId: string;
+  scriptId: string;
+  slugs: SceneSlugPayload[];
+  sourceType: SceneSourceType;
+}): number {
+  const now = nowIso();
+  const sceneRows = sceneRowsFromSlugs({
+    projectId: opts.projectId,
+    scriptId: opts.scriptId,
+    slugs: opts.slugs,
+    sourceType: opts.sourceType,
+    now,
+  });
+
+  sqlite.transaction(() => {
+    const oldScenes = db
+      .select({ id: scenes.id })
+      .from(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
+      )
+      .all();
+
+    for (const old of oldScenes) {
+      db.delete(cheatSheets).where(eq(cheatSheets.sceneId, old.id)).run();
+    }
+
+    db.delete(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
+      )
+      .run();
+
+    db.update(scripts)
+      .set({ sourceType: opts.sourceType })
+      .where(eq(scripts.id, opts.scriptId))
+      .run();
+
+    for (const row of sceneRows) {
+      db.insert(scenes).values(row).run();
+    }
+  })();
+
+  return sceneRows.length;
+}
+
 export type RemapTransferMap = Record<string, boolean>;
 
 function reassignSceneScopedData(oldId: string, newId: string) {
@@ -228,9 +358,34 @@ function deleteSceneScopedData(sceneId: string) {
   db.delete(cheatSheets).where(eq(cheatSheets.sceneId, sceneId)).run();
 }
 
+export function previewScriptReplaceFromSlugs(opts: {
+  projectId: string;
+  scriptId: string;
+  slugs: SceneSlugPayload[];
+}): { diff: SceneDiffEntry[]; newSceneCount: number } {
+  const oldScenes = db
+    .select()
+    .from(scenes)
+    .where(
+      and(
+        eq(scenes.projectId, opts.projectId),
+        eq(scenes.scriptId, opts.scriptId)
+      )
+    )
+    .all()
+    .map(mapScene);
+
+  const parts = slugsToSplitScenes(opts.slugs);
+  return {
+    diff: diffScriptScenes(oldScenes, parts),
+    newSceneCount: parts.length,
+  };
+}
+
 /**
  * Preview a script revision: parse new PDF text and diff against current scenes.
  * Does not write to the database.
+ * @deprecated Prefer client-side parse + previewScriptReplaceFromSlugs.
  */
 export function previewScriptReplace(opts: {
   projectId: string;
@@ -324,6 +479,86 @@ export function replaceScriptScenesWithRemap(opts: {
     }
 
     // Drop prep for old scenes that were not remapped (removed / declined)
+    for (const id of oldIds) {
+      if (!remappedOldIds.has(id)) {
+        deleteSceneScopedData(id);
+      }
+    }
+
+    if (oldIds.length > 0) {
+      db.delete(scenes).where(inArray(scenes.id, oldIds)).run();
+    }
+
+    db.update(scripts)
+      .set({ sourceType: opts.sourceType })
+      .where(eq(scripts.id, opts.scriptId))
+      .run();
+  })();
+
+  return { sceneCount: parts.length, transferred };
+}
+
+export function replaceScriptScenesWithRemapFromSlugs(opts: {
+  projectId: string;
+  scriptId: string;
+  slugs: SceneSlugPayload[];
+  sourceType: SceneSourceType;
+  transfers: RemapTransferMap;
+}): { sceneCount: number; transferred: number } {
+  const now = nowIso();
+  const parts = slugsToSplitScenes(opts.slugs);
+  const oldScenes = db
+    .select()
+    .from(scenes)
+    .where(
+      and(
+        eq(scenes.projectId, opts.projectId),
+        eq(scenes.scriptId, opts.scriptId)
+      )
+    )
+    .all()
+    .map(mapScene);
+
+  const diff = diffScriptScenes(oldScenes, parts);
+  let transferred = 0;
+
+  sqlite.transaction(() => {
+    const oldIds = oldScenes.map((s) => s.id);
+    const remappedOldIds = new Set<string>();
+
+    for (const entry of diff) {
+      if (!entry.newScene) continue;
+      const newId = createId("scene");
+      const old = entry.oldScene;
+      const shouldTransfer =
+        Boolean(old) &&
+        (entry.status === "unchanged" || entry.status === "changed") &&
+        (opts.transfers[old!.id] ?? entry.transferDefault);
+
+      db.insert(scenes)
+        .values({
+          id: newId,
+          projectId: opts.projectId,
+          scriptId: opts.scriptId,
+          heading: entry.newScene.heading,
+          orderIndex: entry.newScene.orderIndex,
+          sceneNumber: entry.newScene.sceneNumber,
+          shootDay: shouldTransfer ? (old?.shootDay ?? null) : null,
+          shootOrder: shouldTransfer ? (old?.shootOrder ?? null) : null,
+          rawText: SLUG_ONLY_RAW_TEXT,
+          sourceType: opts.sourceType,
+          parsedMeta: null,
+          createdAt: now,
+        })
+        .run();
+
+      if (shouldTransfer && old) {
+        reassignSceneScopedData(old.id, newId);
+        remappedOldIds.add(old.id);
+        transferred += 1;
+      }
+    }
+
     for (const id of oldIds) {
       if (!remappedOldIds.has(id)) {
         deleteSceneScopedData(id);

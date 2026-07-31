@@ -3,7 +3,7 @@
 import { ExportDialog } from "@/components/project/export-dialog";
 import type { Scene, Script } from "@/types";
 
-export { downloadExport, previewExport } from "@/lib/export-client";
+export { downloadExport, fetchExportPreview } from "@/lib/export-client";
 
 /**
  * Export scene reference packs. Opens a dialog to pick scenes,
@@ -33,7 +33,6 @@ export function ExportMenu({
       scenes={scenes}
       activeSceneId={sceneId}
       mode="pack"
-      defaultIncludeCanvas
       triggerLabel="Export"
       triggerVariant={variant}
       triggerSize={size}

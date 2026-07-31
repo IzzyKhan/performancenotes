@@ -70,19 +70,9 @@ function toNew(part: SplitScene, orderIndex: number): DiffNewScene {
   };
 }
 
-function isBodyChanged(oldText: string, newText: string): boolean {
-  const a = oldText.replace(/\s+/g, " ").trim();
-  const b = newText.replace(/\s+/g, " ").trim();
-  if (a === b) return false;
-  // Heading-only / whitespace edits shouldn't force a "changed" prompt
-  const lenRatio =
-    Math.min(a.length, b.length) / Math.max(a.length, b.length || 1);
-  if (lenRatio > 0.92 && a.slice(0, 200) === b.slice(0, 200)) return false;
-  return true;
-}
-
 /**
  * Diff existing episode scenes against a newly parsed script revision.
+ * Slug-only at launch: "changed" means heading differs (not dialogue/action).
  * Prefers production scene numbers, then normalized headings.
  */
 export function diffScriptScenes(
@@ -123,11 +113,9 @@ export function diffScriptScenes(
       const newScene = newList[0];
       usedOld.add(oldScene.id);
       usedNew.add(newScene.key);
-      const headingChanged =
+      const changed =
         normalizeHeading(oldScene.heading) !==
         normalizeHeading(newScene.heading);
-      const bodyChanged = isBodyChanged(oldScene.rawText, newScene.rawText);
-      const changed = headingChanged || bodyChanged;
       entries.push({
         status: changed ? "changed" : "unchanged",
         oldScene,
@@ -155,9 +143,8 @@ export function diffScriptScenes(
       const newScene = hits[0];
       usedOld.add(oldScene.id);
       usedNew.add(newScene.key);
-      const bodyChanged = isBodyChanged(oldScene.rawText, newScene.rawText);
       entries.push({
-        status: bodyChanged ? "changed" : "unchanged",
+        status: "unchanged",
         oldScene,
         newScene,
         matchReason: "heading",

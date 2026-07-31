@@ -27,8 +27,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CalendarDays, GripVertical, Plus } from "lucide-react";
+import { CalendarDays, GripVertical, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -48,8 +49,54 @@ import {
 import { toast } from "sonner";
 
 const UNSCHEDULED = "unscheduled";
+const MAX_BULK_SHOOT_DAYS = 120;
 
 type Columns = Record<string, string[]>;
+
+type ScheduleAssignment = {
+  id: string;
+  shootDay: number | null;
+  shootOrder: number | null;
+};
+
+function assignmentsFromColumns(
+  columns: Columns,
+  scenes: Scene[]
+): ScheduleAssignment[] {
+  const known = new Set(scenes.map((s) => s.id));
+  const seen = new Set<string>();
+  const assignments: ScheduleAssignment[] = [];
+
+  for (const [key, ids] of Object.entries(columns)) {
+    const day = parseDayKey(key);
+    ids.forEach((id, i) => {
+      if (!known.has(id)) return;
+      seen.add(id);
+      assignments.push({
+        id,
+        shootDay: day,
+        shootOrder: day == null ? null : i + 1,
+      });
+    });
+  }
+
+  for (const s of scenes) {
+    if (!seen.has(s.id)) {
+      assignments.push({
+        id: s.id,
+        shootDay: null,
+        shootOrder: null,
+      });
+    }
+  }
+
+  assignments.sort((a, b) => a.id.localeCompare(b.id));
+  return assignments;
+}
+
+function assignmentsSnapshot(columns: Columns, scenes: Scene[]): string {
+  return JSON.stringify(assignmentsFromColumns(columns, scenes));
+}
 
 function dayKey(n: number) {
   return `day-${n}`;
@@ -186,6 +233,7 @@ function DayColumn({
   scenesById,
   labelFor,
   className,
+  onDelete,
 }: {
   id: string;
   title: string;
@@ -193,6 +241,7 @@ function DayColumn({
   scenesById: Map<string, Scene>;
   labelFor: (scene: Scene) => string;
   className?: string;
+  onDelete?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id,
@@ -241,6 +290,21 @@ function DayColumn({
           </p>
         ) : null}
       </div>
+      {onDelete ? (
+        <div className="flex shrink-0 justify-end px-1.5 py-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-6 text-muted-foreground hover:text-destructive"
+            title={`Remove ${title}`}
+            aria-label={`Remove ${title}`}
+            onClick={onDelete}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -257,11 +321,15 @@ export function ShootScheduleDialog({
   onScenesChange: (scenes: Scene[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [columns, setColumns] = useState<Columns>(() =>
     buildColumns(scenes, scripts)
   );
+  const [initialSnapshot, setInitialSnapshot] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [bulkDaysOpen, setBulkDaysOpen] = useState(false);
+  const [bulkDaysInput, setBulkDaysInput] = useState("1");
 
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
@@ -275,9 +343,19 @@ export function ShootScheduleDialog({
     const next = buildColumns(scenes, scripts);
     setColumns(next);
     columnsRef.current = next;
+    setInitialSnapshot(assignmentsSnapshot(next, scenes));
+    setConfirmCloseOpen(false);
     // intentionally omit scenes/scripts: capture board state at open time
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const isDirty = useMemo(
+    () =>
+      open &&
+      initialSnapshot !== "" &&
+      assignmentsSnapshot(columns, scenes) !== initialSnapshot,
+    [open, initialSnapshot, columns, scenes]
+  );
 
   const scenesById = useMemo(
     () => new Map(scenes.map((s) => [s.id, s])),
@@ -307,6 +385,11 @@ export function ShootScheduleDialog({
         .filter((k) => k !== UNSCHEDULED)
         .sort((a, b) => (parseDayKey(a) ?? 0) - (parseDayKey(b) ?? 0)),
     [columns]
+  );
+
+  const currentDayCount = useMemo(
+    () => dayKeys.reduce((max, k) => Math.max(max, parseDayKey(k) ?? 0), 0),
+    [dayKeys]
   );
 
   const sensors = useSensors(
@@ -369,6 +452,83 @@ export function ShootScheduleDialog({
       columnsRef.current = updated;
       return updated;
     });
+  }
+
+  function removeDay(key: string) {
+    if (key === UNSCHEDULED) return;
+
+    const movedCount = columnsRef.current[key]?.length ?? 0;
+    const dayNum = parseDayKey(key);
+
+    setColumns((prev) => {
+      if (!(key in prev)) return prev;
+
+      const moved = prev[key] ?? [];
+      const unscheduled = sortUnscheduled([
+        ...(prev[UNSCHEDULED] ?? []),
+        ...moved,
+      ]);
+      const updated = { ...prev };
+      delete updated[key];
+      updated[UNSCHEDULED] = unscheduled;
+      columnsRef.current = updated;
+      return updated;
+    });
+
+    if (movedCount > 0) {
+      toast.message(
+        `Day ${dayNum} removed — ${movedCount} scene${movedCount === 1 ? "" : "s"} moved to Unscheduled`
+      );
+    }
+  }
+
+  function ensureShootDays(count: number) {
+    const target = Math.floor(count);
+    if (target < 1) return 0;
+
+    let added = 0;
+    setColumns((prev) => {
+      const updated = { ...prev };
+      for (let d = 1; d <= target; d++) {
+        const key = dayKey(d);
+        if (!(key in updated)) {
+          updated[key] = [];
+          added += 1;
+        }
+      }
+      columnsRef.current = updated;
+      return updated;
+    });
+    return added;
+  }
+
+  function openBulkDaysDialog() {
+    setBulkDaysInput(String(Math.max(1, currentDayCount || 1)));
+    setBulkDaysOpen(true);
+  }
+
+  function applyBulkShootDays() {
+    const parsed = Number.parseInt(bulkDaysInput.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      toast.error("Enter at least 1 shoot day");
+      return;
+    }
+    if (parsed > MAX_BULK_SHOOT_DAYS) {
+      toast.error(`Maximum ${MAX_BULK_SHOOT_DAYS} shoot days at once`);
+      return;
+    }
+
+    const added = ensureShootDays(parsed);
+    setBulkDaysOpen(false);
+    if (added > 0) {
+      toast.success(
+        parsed === 1
+          ? "Day 1 is ready"
+          : `Days 1–${parsed} are ready (${added} new)`
+      );
+    } else {
+      toast.message(`Already have ${currentDayCount} shoot days`);
+    }
   }
 
   function moveBetweenContainers(
@@ -507,37 +667,10 @@ export function ShootScheduleDialog({
     recentlyMovedToNewContainer.current = false;
   }
 
-  async function save() {
+  async function save(): Promise<boolean> {
     setSaving(true);
     try {
-      const known = new Set(scenes.map((s) => s.id));
-      const seen = new Set<string>();
-      const assignments = Object.entries(columnsRef.current).flatMap(
-        ([key, ids]) => {
-          const day = parseDayKey(key);
-          return ids
-            .filter((id) => known.has(id))
-            .map((id, i) => {
-              seen.add(id);
-              return {
-                id,
-                shootDay: day,
-                shootOrder: day == null ? null : i + 1,
-              };
-            });
-        }
-      );
-
-      // Any known scene missing from the board is explicitly unscheduled
-      for (const s of scenes) {
-        if (!seen.has(s.id)) {
-          assignments.push({
-            id: s.id,
-            shootDay: null,
-            shootOrder: null,
-          });
-        }
-      }
+      const assignments = assignmentsFromColumns(columnsRef.current, scenes);
 
       const res = await fetch("/api/scenes/schedule", {
         method: "PUT",
@@ -549,18 +682,48 @@ export function ShootScheduleDialog({
       if (!res.ok) throw new Error(data.error || "Failed to save schedule");
       onScenesChange(data as Scene[]);
       toast.success("Shoot schedule saved");
+      setInitialSnapshot(assignmentsSnapshot(columnsRef.current, data as Scene[]));
+      setConfirmCloseOpen(false);
       setOpen(false);
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save schedule");
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
+  function requestClose() {
+    if (isDirty) {
+      setConfirmCloseOpen(true);
+      return;
+    }
+    setOpen(false);
+  }
+
+  function handleMainOpenChange(next: boolean) {
+    if (next) {
+      setOpen(true);
+      return;
+    }
+    requestClose();
+  }
+
+  function discardAndClose() {
+    setConfirmCloseOpen(false);
+    setOpen(false);
+  }
+
+  async function saveAndClose() {
+    await save();
+  }
+
   const activeScene = activeId ? scenesById.get(activeId) : null;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+    <Dialog open={open} onOpenChange={handleMainOpenChange}>
       <DialogTrigger
         render={
           <Button
@@ -583,8 +746,26 @@ export function ShootScheduleDialog({
           <DialogTitle>Production schedule</DialogTitle>
           <DialogDescription>
             Drag and drop scenes onto days to align with your production schedule.
+            Your scene prep can then be exported in schedule order.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={openBulkDaysDialog}
+          >
+            Set shoot days…
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            {currentDayCount === 0
+              ? "No shoot days yet"
+              : `${currentDayCount} shoot day${currentDayCount === 1 ? "" : "s"}`}
+          </span>
+        </div>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <DndContext
@@ -617,6 +798,7 @@ export function ShootScheduleDialog({
                     sceneIds={columns[key] ?? []}
                     scenesById={scenesById}
                     labelFor={labelFor}
+                    onDelete={() => removeDay(key)}
                   />
                 ))}
                 <button
@@ -661,16 +843,106 @@ export function ShootScheduleDialog({
           <Button
             type="button"
             variant="outline"
-            onClick={() => setOpen(false)}
+            onClick={requestClose}
             disabled={saving}
           >
             Cancel
           </Button>
-          <Button type="button" onClick={() => void save()} disabled={saving}>
+          <Button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || !isDirty}
+          >
             {saving ? "Saving…" : "Save schedule"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={bulkDaysOpen} onOpenChange={setBulkDaysOpen}>
+      <DialogContent className="gap-0 p-0 sm:max-w-sm" showCloseButton={false}>
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle>Set shoot days</DialogTitle>
+          <DialogDescription>
+            Create day columns numbered 1 through N. Existing days and assigned
+            scenes are kept — use Add day to extend one at a time.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="px-4 py-4">
+          <label className="flex flex-col gap-1.5 text-xs">
+            <span className="font-medium text-muted-foreground">
+              Number of shoot days
+            </span>
+            <Input
+              type="number"
+              min={1}
+              max={MAX_BULK_SHOOT_DAYS}
+              inputMode="numeric"
+              value={bulkDaysInput}
+              onChange={(e) => setBulkDaysInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyBulkShootDays();
+                }
+              }}
+              autoFocus
+            />
+          </label>
+        </div>
+        <DialogFooter className="mx-0 mb-0 gap-2 rounded-none px-4 py-3 sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setBulkDaysOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button type="button" onClick={applyBulkShootDays}>
+            Create days
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
+      <DialogContent className="gap-0 p-0 sm:max-w-lg" showCloseButton={false}>
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle>Save schedule changes?</DialogTitle>
+          <DialogDescription>
+            You have unsaved changes to the shoot schedule. Save before closing?
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={discardAndClose}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            Discard
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => setConfirmCloseOpen(false)}
+            >
+              Keep editing
+            </Button>
+            <Button
+              type="button"
+              disabled={saving}
+              onClick={() => void saveAndClose()}
+            >
+              {saving ? "Saving…" : "Save schedule"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

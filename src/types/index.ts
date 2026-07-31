@@ -1,4 +1,93 @@
-export type CanvasNodeType = "text" | "image" | "audio" | "video-link" | "mood";
+export type CanvasNodeType =
+  | "text"
+  | "image"
+  | "audio"
+  | "video-link"
+  | "mood"
+  | "shot-list"
+  | "image-grid"
+  | "performance-notes"
+  | "scene-synopsis";
+
+export type ShotListColumnId =
+  | "status"
+  | "image"
+  | "setup"
+  | "shot"
+  | "description"
+  | "camera"
+  | "shotSize"
+  | "shotType"
+  | "movement";
+
+export type ShotListRowStatus = "todo" | "done";
+
+export interface ShotListRow {
+  id: string;
+  status: ShotListRowStatus;
+  imagePath: string | null;
+  /** Setup number (e.g. "1"); combined with camera letter → shot code "1A". */
+  setup: string;
+  /** Legacy ordinal; display shot code is derived from setup + camera. */
+  shot: number;
+  description: string;
+  camera: string;
+  shotSize: string;
+  shotType: string;
+  movement: string;
+}
+
+export interface ShotListContent {
+  title: string;
+  /** Visible columns in display order (subset of the template catalog). */
+  columns: ShotListColumnId[];
+  rows: ShotListRow[];
+  /** Canvas node width in px (user-resized). */
+  frameWidth?: number;
+  /** Canvas node height in px (user-resized). */
+  frameHeight?: number;
+}
+
+export interface ImageGridItem {
+  id: string;
+  imagePath: string;
+  caption?: string;
+}
+
+export interface ImageGridContent {
+  title: string;
+  /** Display / export order. */
+  images: ImageGridItem[];
+  /** Grid density: 2 | 3 | 4. */
+  gridColumns: number;
+  frameWidth?: number;
+  frameHeight?: number;
+}
+
+export interface PerformanceNotesCharacter {
+  id: string;
+  character: string;
+  objectives: string;
+  /** Action verbs — free text, e.g. "to plead, to deflect". */
+  actions: string;
+}
+
+export interface PerformanceNotesBeat {
+  id: string;
+  beat: string;
+  characters: PerformanceNotesCharacter[];
+}
+
+export interface PerformanceNotesContent {
+  title: string;
+  beats: PerformanceNotesBeat[];
+  frameWidth?: number;
+  frameHeight?: number;
+}
+
+export interface SceneSynopsisContent {
+  synopsis: string;
+}
 
 export type SceneSourceType = "pdf" | "typed";
 
@@ -47,6 +136,19 @@ export interface CanvasNodeContent {
   url?: string;
   mood?: string;
   color?: string;
+  /** Present when type === "shot-list" (also mirrored as nested fields). */
+  title?: string;
+  columns?: ShotListColumnId[];
+  rows?: ShotListRow[];
+  frameWidth?: number;
+  frameHeight?: number;
+  /** Present when type === "image-grid". */
+  images?: ImageGridItem[];
+  gridColumns?: number;
+  /** Present when type === "performance-notes". */
+  beats?: PerformanceNotesBeat[];
+  /** Present when type === "scene-synopsis". */
+  synopsis?: string;
 }
 
 export interface CanvasNode {

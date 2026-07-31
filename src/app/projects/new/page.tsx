@@ -10,8 +10,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { fileWithSafeName } from "@/lib/multipart";
 import { postWithRetry, snapshotFile, UploadError } from "@/lib/upload-client";
+import {
+  parsePdfFileToSlugs,
+  parseTypedTextToSlugs,
+} from "@/lib/client-script-parse";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type ProjectKind = "single" | "series";
@@ -99,17 +102,11 @@ async function uploadScriptPdf(
   scriptTitle: string,
   file: File
 ): Promise<{ sceneCount?: number }> {
-  // The file may have been picked minutes ago while filling the form —
-  // read it into memory now so a stale handle fails fast with a clear error.
-  const form = new FormData();
-  form.append("projectId", projectId);
-  form.append("title", scriptTitle);
-  form.append("episodeNumber", String(epNum));
-  form.append("file", fileWithSafeName(await snapshotFile(file)));
+  const parsed = await parsePdfFileToSlugs(await snapshotFile(file));
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
 
-  // Creating a script is not idempotent, so we can't blindly retry: a lost
-  // response would duplicate the episode. Between attempts, check whether the
-  // script actually saved server-side and stop if it did.
   const alreadySaved = async () => {
     const scripts = await listProjectScripts(projectId);
     return scripts.some(
@@ -122,16 +119,26 @@ async function uploadScriptPdf(
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await postWithRetry("/api/scripts", form, {
-        label: `PDF upload for ${scriptTitle}`,
-        timeoutMs: 180_000,
-        retries: 0,
-      });
+      const data = await postWithRetry(
+        "/api/scripts",
+        JSON.stringify({
+          projectId,
+          title: scriptTitle,
+          episodeNumber: epNum,
+          sourceType: parsed.sourceType,
+          scenes: parsed.slugs,
+        }),
+        {
+          label: `PDF upload for ${scriptTitle}`,
+          timeoutMs: 120_000,
+          retries: 0,
+        }
+      );
       return data as { sceneCount?: number };
     } catch (e) {
       if (await alreadySaved()) return {};
       if (e instanceof UploadError && e.status !== undefined && ![502, 503, 504].includes(e.status)) {
-        throw e; // Real application error (bad PDF, auth) — retrying won't help.
+        throw e;
       }
       lastError =
         e instanceof Error
@@ -241,14 +248,18 @@ export default function NewProjectPage() {
                 { id: progress }
               );
             } else {
+              const parsed = parseTypedTextToSlugs(d.text.trim());
+              if (!parsed.ok) {
+                throw new Error(parsed.error);
+              }
               await postJson(
                 "/api/scripts",
                 {
                   projectId,
                   title: scriptTitle,
                   episodeNumber: epNum,
-                  rawText: d.text.trim(),
-                  sourceType: "typed",
+                  sourceType: parsed.sourceType,
+                  scenes: parsed.slugs,
                 },
                 `Failed to add ${scriptTitle}`
               );

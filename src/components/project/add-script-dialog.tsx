@@ -16,7 +16,10 @@ import {
   ScriptEpisodeForm,
   type ScriptEpisodeDraft,
 } from "@/components/project/script-episode-form";
-import { fileWithSafeName } from "@/lib/multipart";
+import {
+  parsePdfFileToSlugs,
+  parseTypedTextToSlugs,
+} from "@/lib/client-script-parse";
 import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { toast } from "sonner";
 import type { Script } from "@/types";
@@ -79,53 +82,41 @@ export function AddScriptDialog({
     setSubmitting(true);
     const progress = toast.loading(`Adding ${title}…`);
     try {
-      let scriptId: string | undefined;
-      if (draft.mode === "pdf" && draft.file) {
-        const form = new FormData();
-        form.append("projectId", projectId);
-        form.append("title", title);
-        form.append("episodeNumber", String(epNum));
-        form.append("file", fileWithSafeName(await snapshotFile(draft.file)));
-        const data = (await postWithRetry("/api/scripts", form, {
-          label: "PDF upload",
-          timeoutMs: 180_000,
-          retries: 0,
-        })) as { script?: { id?: string }; sceneCount?: number };
-        scriptId =
-          typeof data.script?.id === "string" ? data.script.id : undefined;
-        await onAdded(scriptId);
-        toast.success(
-          typeof data.sceneCount === "number" && data.sceneCount > 1
-            ? `Episode added — ${data.sceneCount} scenes`
-            : "Episode added",
-          { id: progress }
-        );
-      } else {
-        const data = (await postWithRetry(
-          "/api/scripts",
-          JSON.stringify({
-            projectId,
-            title,
-            episodeNumber: epNum,
-            rawText: draft.text.trim(),
-            sourceType: "typed",
-          }),
-          {
-            label: "Add episode",
-            timeoutMs: 60_000,
-            retries: 0,
-          }
-        )) as { script?: { id?: string }; sceneCount?: number };
-        scriptId =
-          typeof data.script?.id === "string" ? data.script.id : undefined;
-        await onAdded(scriptId);
-        toast.success(
-          typeof data.sceneCount === "number" && data.sceneCount > 1
-            ? `Episode added — ${data.sceneCount} scenes`
-            : "Episode added",
-          { id: progress }
-        );
+      const parsed =
+        draft.mode === "pdf" && draft.file
+          ? await parsePdfFileToSlugs(await snapshotFile(draft.file))
+          : parseTypedTextToSlugs(draft.text.trim());
+
+      if (!parsed.ok) {
+        toast.error(parsed.error, { id: progress });
+        return;
       }
+
+      const data = (await postWithRetry(
+        "/api/scripts",
+        JSON.stringify({
+          projectId,
+          title,
+          episodeNumber: epNum,
+          sourceType: parsed.sourceType,
+          scenes: parsed.slugs,
+        }),
+        {
+          label: "Add episode",
+          timeoutMs: 120_000,
+          retries: 0,
+        }
+      )) as { script?: { id?: string }; sceneCount?: number };
+
+      const scriptId =
+        typeof data.script?.id === "string" ? data.script.id : undefined;
+      await onAdded(scriptId);
+      toast.success(
+        typeof data.sceneCount === "number" && data.sceneCount > 1
+          ? `Episode added — ${data.sceneCount} scenes`
+          : "Episode added",
+        { id: progress }
+      );
       setOpen(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add episode", {

@@ -25,15 +25,22 @@ export function ThemeToggle({
       variant="ghost"
       size="icon-sm"
       className={className}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      title={isDark ? "Light mode" : "Dark mode"}
+      // Keep labels stable until mount — resolvedTheme differs on SSR vs client.
+      aria-label={
+        mounted
+          ? isDark
+            ? "Switch to light mode"
+            : "Switch to dark mode"
+          : "Toggle theme"
+      }
+      title={mounted ? (isDark ? "Light mode" : "Dark mode") : "Theme"}
       disabled={!mounted}
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
-      {mounted && isDark ? (
-        <Sun className="size-4 stroke-[1.5]" />
-      ) : (
+      {!mounted || !isDark ? (
         <Moon className="size-4 stroke-[1.5]" />
+      ) : (
+        <Sun className="size-4 stroke-[1.5]" />
       )}
     </Button>
   );

@@ -7,7 +7,7 @@ export const users = sqliteTable("users", {
   createdAt: text("created_at").notNull(),
   /** Stripe customer id when billing is enabled (Phase 4). */
   stripeCustomerId: text("stripe_customer_id"),
-  /** prep | dramaturg | null (free/pilot). */
+  /** free | organize | dramaturg | null (free). Legacy "prep" → organize in Stage 2. */
   plan: text("plan"),
   /** Monthly Claude request count (quota). */
   chatUsageCount: integer("chat_usage_count").notNull().default(0),
@@ -47,6 +47,7 @@ export const scenes = sqliteTable("scenes", {
   sceneNumber: text("scene_number"),
   shootDay: integer("shoot_day"),
   shootOrder: integer("shoot_order"),
+  /** Slug-only on launch tiers — dialogue/action not persisted (empty string). */
   rawText: text("raw_text").notNull(),
   sourceType: text("source_type").notNull(), // pdf | typed
   parsedMeta: text("parsed_meta"), // JSON string
@@ -59,7 +60,7 @@ export const canvasNodes = sqliteTable("canvas_nodes", {
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   sceneId: text("scene_id"), // null = project-wide (legacy)
-  type: text("type").notNull(), // text | image | audio | video-link | mood
+  type: text("type").notNull(), // text | image | audio | video-link | mood | shot-list | image-grid
   content: text("content").notNull(), // JSON string
   positionX: real("position_x").notNull().default(0),
   positionY: real("position_y").notNull().default(0),
@@ -86,5 +87,17 @@ export const cheatSheets = sqliteTable("cheat_sheets", {
   sceneId: text("scene_id"), // null for legacy project-wide sheets
   content: text("content").notNull(), // JSON string
   version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+});
+
+/** Project-scoped empty canvas layout templates. */
+export const canvasTemplates = sqliteTable("canvas_templates", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  sourceSceneId: text("source_scene_id"),
+  nodes: text("nodes").notNull(), // JSON array of CanvasTemplateNode
   createdAt: text("created_at").notNull(),
 });

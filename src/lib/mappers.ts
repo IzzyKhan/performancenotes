@@ -11,6 +11,10 @@ import type {
   Script,
 } from "@/types";
 import { normalizeActionNote } from "@/lib/action-verbs";
+import { normalizeShotListContent } from "@/lib/shot-list";
+import { normalizeImageGridContent } from "@/lib/image-grid";
+import { normalizePerformanceNotesContent } from "@/lib/performance-notes";
+import { normalizeSceneSynopsisContent } from "@/lib/scene-synopsis";
 
 export function mapScript(row: {
   id: string;
@@ -82,12 +86,24 @@ export function mapCanvasNode(row: {
   label: string | null;
   createdAt: string;
 }): CanvasNode {
+  const type = row.type as CanvasNode["type"];
+  const raw = parseJson<CanvasNodeContent>(row.content, {});
+  const content =
+    type === "shot-list"
+      ? (normalizeShotListContent(raw) as CanvasNodeContent)
+      : type === "image-grid"
+        ? (normalizeImageGridContent(raw) as CanvasNodeContent)
+        : type === "performance-notes"
+          ? (normalizePerformanceNotesContent(raw) as CanvasNodeContent)
+          : type === "scene-synopsis"
+            ? (normalizeSceneSynopsisContent(raw) as CanvasNodeContent)
+            : raw;
   return {
     id: row.id,
     projectId: row.projectId,
     sceneId: row.sceneId,
-    type: row.type as CanvasNode["type"],
-    content: parseJson<CanvasNodeContent>(row.content, {}),
+    type,
+    content,
     positionX: row.positionX,
     positionY: row.positionY,
     label: row.label,

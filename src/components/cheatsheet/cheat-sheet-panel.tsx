@@ -123,7 +123,6 @@ export function CheatSheetPanel({
         scenes={scenes}
         activeSceneId={sceneId}
         mode="sheet"
-        defaultIncludeCanvas={includeCanvas}
         triggerLabel="Export…"
         triggerVariant="outline"
         triggerSize="sm"

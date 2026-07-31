@@ -92,6 +92,15 @@ function initSchema(sqlite: Database.Database) {
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS canvas_templates (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      source_scene_id TEXT,
+      nodes TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   migrate(sqlite);
@@ -135,6 +144,17 @@ function migrate(sqlite: Database.Database) {
   ensureColumn("users", "plan", "plan TEXT");
   ensureColumn("users", "chat_usage_count", "chat_usage_count INTEGER NOT NULL DEFAULT 0");
   ensureColumn("users", "chat_usage_reset_at", "chat_usage_reset_at TEXT");
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS canvas_templates (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      source_scene_id TEXT,
+      nodes TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
 
   // Multi-script: create scripts table + backfill script_id on existing scenes
   sqlite.exec(`

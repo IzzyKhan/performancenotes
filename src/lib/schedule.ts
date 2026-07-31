@@ -94,17 +94,21 @@ export function sceneSlugLabel(
   return `${scriptShortLabel(script)} · ${base}`;
 }
 
+/** Shoot-day chip for PDF headers: "Day 2 · #3", or null if unscheduled. */
+export function shootDayOrderLabel(scene: Scene): string | null {
+  if (scene.shootDay == null) return null;
+  const order = scene.shootOrder ?? 1;
+  return `Day ${scene.shootDay} · #${order}`;
+}
+
 export function shootSectionLabel(
   scene: Scene,
   script?: Script | null,
   multiScript = false
 ): string {
   const slug = sceneSlugLabel(scene, script, multiScript);
-  if (scene.shootDay != null) {
-    const order = scene.shootOrder ?? 1;
-    return `Day ${scene.shootDay} · #${order} · ${slug}`;
-  }
-  return slug;
+  const day = shootDayOrderLabel(scene);
+  return day ? `${day} · ${slug}` : slug;
 }
 
 /** Sort scene ids by script order then scene order (for unscheduled column). */

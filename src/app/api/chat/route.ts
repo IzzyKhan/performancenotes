@@ -20,7 +20,7 @@ import {
   DISTILL_INSTRUCTIONS,
 } from "@/lib/prompts";
 import {
-  getImageNodes,
+  collectVisionImagePaths,
   readImageAsBase64,
   serializeCanvasForText,
 } from "@/lib/media";
@@ -285,8 +285,8 @@ export async function POST(request: Request) {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
         const imageBlocks: Anthropic.ImageBlockParam[] = [];
-        for (const node of getImageNodes(nodeRows).slice(0, 6)) {
-          const img = readImageAsBase64(node.content.filePath!);
+        for (const filePath of collectVisionImagePaths(nodeRows).slice(0, 6)) {
+          const img = readImageAsBase64(filePath);
           if (img) {
             imageBlocks.push({
               type: "image",

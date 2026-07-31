@@ -1,6 +1,17 @@
 import fs from "fs";
 import path from "path";
-import type { CanvasNode } from "@/types";
+import type { CanvasNode, ShotListRow } from "@/types";
+import { formatShotListForContext } from "@/lib/shot-list";
+import {
+  collectImagePaths,
+  formatImageGridForContext,
+  normalizeImageGridContent,
+} from "@/lib/image-grid";
+import {
+  formatPerformanceNotesForContext,
+  normalizePerformanceNotesContent,
+} from "@/lib/performance-notes";
+import { normalizeSceneSynopsisContent } from "@/lib/scene-synopsis";
 
 export const UPLOADS_DIR = path.join(
   /* turbopackIgnore: true */ process.cwd(),
@@ -40,6 +51,25 @@ export function serializeCanvasForText(nodes: CanvasNode[]): string {
           return `[Node ${i + 1} — VIDEO/REF LINK] ${annotation}\nURL: ${node.content.url ?? ""}`;
         case "mood":
           return `[Node ${i + 1} — MOOD] ${annotation}\nMood: ${node.content.mood ?? ""}`;
+        case "shot-list": {
+          const title = node.content.title ?? node.label ?? "Shot list";
+          const rows = Array.isArray(node.content.rows)
+            ? (node.content.rows as ShotListRow[])
+            : [];
+          return `[Node ${i + 1} — SHOT LIST] ${annotation}\n${formatShotListForContext(title, rows)}`;
+        }
+        case "image-grid": {
+          const grid = normalizeImageGridContent(node.content);
+          return `[Node ${i + 1} — IMAGE GRID] ${annotation}\n${formatImageGridForContext(grid.title, grid.images)}`;
+        }
+        case "performance-notes": {
+          const perf = normalizePerformanceNotesContent(node.content);
+          return `[Node ${i + 1} — PERFORMANCE NOTES] ${annotation}\n${formatPerformanceNotesForContext(perf.title, perf.beats)}`;
+        }
+        case "scene-synopsis": {
+          const syn = normalizeSceneSynopsisContent(node.content);
+          return `[Node ${i + 1} — SCENE SYNOPSIS]\n${syn.synopsis || "(empty)"}`;
+        }
         default:
           return `[Node ${i + 1}] ${annotation}`;
       }
@@ -47,8 +77,14 @@ export function serializeCanvasForText(nodes: CanvasNode[]): string {
     .join("\n\n");
 }
 
+/** Single-image canvas nodes (legacy helper). Prefer collectVisionImagePaths. */
 export function getImageNodes(nodes: CanvasNode[]): CanvasNode[] {
   return nodes.filter((n) => n.type === "image" && n.content.filePath);
+}
+
+/** Ordered paths from image + image-grid nodes for vision / export. */
+export function collectVisionImagePaths(nodes: CanvasNode[]): string[] {
+  return collectImagePaths(nodes);
 }
 
 export function readImageAsBase64(filePath: string): {

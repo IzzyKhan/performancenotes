@@ -20,9 +20,12 @@ import {
   Link2,
   Mic,
   StickyNote,
-  Sparkles,
+  Clapperboard,
+  LayoutGrid,
   Trash2,
   Plus,
+  Table2,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +36,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { CanvasNode, CanvasNodeContent, CanvasNodeType } from "@/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { CanvasNode, CanvasNodeContent, CanvasNodeType, Scene, Script } from "@/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -43,6 +53,39 @@ import {
   isHeicFile,
   prepareImageForUpload,
 } from "@/lib/image-prep";
+import { defaultShotListContent } from "@/lib/shot-list";
+import { defaultImageGridContent } from "@/lib/image-grid";
+import { defaultPerformanceNotesContent } from "@/lib/performance-notes";
+import { defaultSceneSynopsisContent } from "@/lib/scene-synopsis";
+import { ShotListNode } from "@/components/canvas/shot-list-node";
+import { ImageGridNode } from "@/components/canvas/image-grid-node";
+import { PerformanceNotesNode } from "@/components/canvas/performance-notes-node";
+import { SceneSynopsisNode } from "@/components/canvas/scene-synopsis-node";
+import {
+  MultiImagePickProvider,
+} from "@/components/canvas/multi-image-pick";
+import { CanvasTemplatesMenu } from "@/components/canvas/canvas-templates-menu";
+
+function canvasDeleteLabel(node: CanvasNode | undefined): string {
+  if (!node) return "this item";
+  const title =
+    typeof node.content.title === "string" && node.content.title.trim()
+      ? node.content.title.trim()
+      : node.label?.trim() || null;
+  if (title) return `"${title}"`;
+  const singular: Partial<Record<CanvasNodeType, string>> = {
+    text: "this text note",
+    image: "this image",
+    audio: "this audio",
+    "video-link": "this reference link",
+    mood: "this mood tag",
+    "shot-list": "this shot list",
+    "image-grid": "this image grid",
+    "performance-notes": "these performance notes",
+    "scene-synopsis": "this scene synopsis",
+  };
+  return singular[node.type] ?? "this item";
+}
 
 type FlowNodeData = {
   canvasNode: CanvasNode;
@@ -71,15 +114,18 @@ function NodeShell({
   onDelete,
   accent,
   selected,
+  showLabel = true,
 }: {
   children: React.ReactNode;
-  label: string;
-  onLabelChange: (v: string) => void;
+  label?: string;
+  onLabelChange?: (v: string) => void;
   onLabelFocus?: () => void;
   onLabelBlur?: () => void;
   onDelete: () => void;
   accent: string;
   selected?: boolean;
+  /** Annotation row ("Why this reference…"). Off for text notes. */
+  showLabel?: boolean;
 }) {
   return (
     <div
@@ -89,18 +135,25 @@ function NodeShell({
       )}
       style={{ borderTopColor: accent, borderTopWidth: 3 }}
     >
-      <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1.5">
-        <Input
-          value={label}
-          onChange={(e) => onLabelChange(e.target.value)}
-          onFocus={onLabelFocus}
-          onBlur={onLabelBlur}
-          onPointerDown={stopCanvasPointer}
-          onMouseDown={stopCanvasPointer}
-          onKeyDown={stopCanvasPointer}
-          placeholder="Why this reference…"
-          className="nodrag nopan h-7 border-0 bg-transparent px-1 text-xs shadow-none focus-visible:ring-0"
-        />
+      <div
+        className={cn(
+          "flex items-center gap-1 border-b border-border/60 px-2 py-1.5",
+          !showLabel && "justify-end"
+        )}
+      >
+        {showLabel ? (
+          <Input
+            value={label ?? ""}
+            onChange={(e) => onLabelChange?.(e.target.value)}
+            onFocus={onLabelFocus}
+            onBlur={onLabelBlur}
+            onPointerDown={stopCanvasPointer}
+            onMouseDown={stopCanvasPointer}
+            onKeyDown={stopCanvasPointer}
+            placeholder="Why this reference…"
+            className="nodrag nopan h-7 border-0 bg-transparent px-1 text-xs shadow-none focus-visible:ring-0"
+          />
+        ) : null}
         <Button
           size="icon-sm"
           variant="ghost"
@@ -150,9 +203,6 @@ function useNodeField(
 
 const TextNode = memo(function TextNode({ data, selected }: NodeProps<FlowNode>) {
   const { canvasNode, onUpdate, onDelete } = data;
-  const label = useNodeField(canvasNode.id, canvasNode.label ?? "", (v) =>
-    onUpdate(canvasNode.id, { label: v })
-  );
   const text = useNodeField(
     canvasNode.id,
     canvasNode.content.text ?? "",
@@ -164,13 +214,10 @@ const TextNode = memo(function TextNode({ data, selected }: NodeProps<FlowNode>)
 
   return (
     <NodeShell
-      label={label.value}
-      onLabelChange={label.onChange}
-      onLabelFocus={label.onFocus}
-      onLabelBlur={label.onBlur}
       onDelete={() => onDelete(canvasNode.id)}
       accent="#f59e0b"
       selected={selected}
+      showLabel={false}
     >
       <Textarea
         value={text.value}
@@ -353,6 +400,10 @@ const nodeTypes = {
   audio: AudioNode,
   "video-link": VideoLinkNode,
   mood: MoodNode,
+  "shot-list": ShotListNode,
+  "image-grid": ImageGridNode,
+  "performance-notes": PerformanceNotesNode,
+  "scene-synopsis": SceneSynopsisNode,
 };
 
 function toFlowNodes(
@@ -360,12 +411,40 @@ function toFlowNodes(
   onUpdate: (id: string, patch: Partial<CanvasNode>) => void,
   onDelete: (id: string) => void
 ): FlowNode[] {
-  return nodes.map((n) => ({
-    id: n.id,
-    type: n.type,
-    position: { x: n.positionX, y: n.positionY },
-    data: { canvasNode: n, onUpdate, onDelete },
-  }));
+  return nodes.map((n) => {
+    if (
+      n.type !== "shot-list" &&
+      n.type !== "image-grid" &&
+      n.type !== "performance-notes"
+    ) {
+      return {
+        id: n.id,
+        type: n.type,
+        position: { x: n.positionX, y: n.positionY },
+        data: { canvasNode: n, onUpdate, onDelete },
+      };
+    }
+    const isGrid = n.type === "image-grid";
+    const isPerf = n.type === "performance-notes";
+    const minW = isGrid ? 280 : 360;
+    const defaultW = isGrid ? 480 : isPerf ? 720 : 640;
+    const defaultH = isGrid ? 360 : isPerf ? 480 : 420;
+    const w =
+      typeof n.content.frameWidth === "number" && n.content.frameWidth >= minW
+        ? n.content.frameWidth
+        : defaultW;
+    const h =
+      typeof n.content.frameHeight === "number" && n.content.frameHeight >= 200
+        ? n.content.frameHeight
+        : defaultH;
+    return {
+      id: n.id,
+      type: n.type,
+      position: { x: n.positionX, y: n.positionY },
+      data: { canvasNode: n, onUpdate, onDelete },
+      style: { width: w, height: h },
+    };
+  });
 }
 
 function mergeCanvasNode(
@@ -427,16 +506,22 @@ function InstinctCanvasInner({
   sceneId,
   sceneHeading,
   initialNodes,
+  scripts,
+  scenes,
 }: {
   projectId: string;
   sceneId: string | null;
   sceneHeading: string | null;
   initialNodes: CanvasNode[];
+  scripts: Script[];
+  scenes: Scene[];
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const { resolvedTheme } = useTheme();
   const colorMode = resolvedTheme === "light" ? "light" : "dark";
   const [canvasNodes, setCanvasNodes] = useState<CanvasNode[]>(initialNodes);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [ready, setReady] = useState(false);
   // Capture once on mount — this component remounts per scene via key
   const [savedViewport] = useState(() => loadViewport(projectId, sceneId));
@@ -478,6 +563,20 @@ function InstinctCanvasInner({
   }, []);
 
   // Refresh nodes for this scene on mount / scene switch
+  const reloadCanvas = useCallback(() => {
+    const params = new URLSearchParams({ projectId });
+    if (sceneId) params.set("sceneId", sceneId);
+    return fetch(`/api/canvas?${params}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((list: CanvasNode[] | null) => {
+        if (list) {
+          setCanvasNodes(list);
+          syncFlowNodes(list);
+        }
+      })
+      .catch(() => {});
+  }, [projectId, sceneId, syncFlowNodes]);
+
   useEffect(() => {
     let cancelled = false;
     const params = new URLSearchParams({ projectId });
@@ -523,9 +622,19 @@ function InstinctCanvasInner({
   );
 
   onUpdateRef.current = (id, patch) => {
-    setCanvasNodes((prev) =>
-      prev.map((n) => (n.id === id ? mergeCanvasNode(n, patch) : n))
-    );
+    setCanvasNodes((prev) => {
+      const current = prev.find((n) => n.id === id);
+      if (!current) return prev;
+      const merged = mergeCanvasNode(current, patch);
+      const apiPatch: Record<string, unknown> = {};
+      // Persist merged content so partial patches don't wipe fields on the server
+      if (patch.content !== undefined) apiPatch.content = merged.content;
+      if (patch.label !== undefined) apiPatch.label = patch.label;
+      if (patch.positionX !== undefined) apiPatch.positionX = patch.positionX;
+      if (patch.positionY !== undefined) apiPatch.positionY = patch.positionY;
+      if (Object.keys(apiPatch).length > 0) schedulePersist(id, apiPatch);
+      return prev.map((n) => (n.id === id ? merged : n));
+    });
     // Patch only this node's data — never rebuild the whole list (that
     // remounts inputs and steals focus mid-keystroke)
     setNodes((nds) =>
@@ -541,19 +650,36 @@ function InstinctCanvasInner({
           : node
       )
     );
-    const apiPatch: Record<string, unknown> = {};
-    if (patch.content !== undefined) apiPatch.content = patch.content;
-    if (patch.label !== undefined) apiPatch.label = patch.label;
-    if (patch.positionX !== undefined) apiPatch.positionX = patch.positionX;
-    if (patch.positionY !== undefined) apiPatch.positionY = patch.positionY;
-    schedulePersist(id, apiPatch);
   };
 
-  onDeleteRef.current = async (id) => {
-    setCanvasNodes((prev) => prev.filter((n) => n.id !== id));
-    setNodes((nds) => nds.filter((n) => n.id !== id));
-    await fetch(`/api/canvas?id=${id}`, { method: "DELETE" });
+  onDeleteRef.current = (id) => {
+    setPendingDeleteId(id);
   };
+
+  const confirmDelete = async () => {
+    const id = pendingDeleteId;
+    if (!id || deleting) return;
+    setDeleting(true);
+    try {
+      setCanvasNodes((prev) => prev.filter((n) => n.id !== id));
+      setNodes((nds) => nds.filter((n) => n.id !== id));
+      const res = await fetch(`/api/canvas?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error("Could not delete from canvas");
+        void reloadCanvas();
+      }
+      setPendingDeleteId(null);
+    } catch {
+      toast.error("Could not delete from canvas");
+      void reloadCanvas();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const pendingDeleteNode = pendingDeleteId
+    ? canvasNodes.find((n) => n.id === pendingDeleteId)
+    : undefined;
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
@@ -770,6 +896,7 @@ function InstinctCanvasInner({
   }
 
   return (
+    <MultiImagePickProvider>
     <div
       className="relative h-full w-full"
       onDragOver={(e) => e.preventDefault()}
@@ -810,7 +937,57 @@ function InstinctCanvasInner({
             <Plus className="size-3.5" />
             Add to canvas
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
+          <DropdownMenuContent align="start" className="w-auto min-w-56">
+            <DropdownMenuItem
+              onClick={() =>
+                createNode(
+                  "scene-synopsis",
+                  defaultSceneSynopsisContent() as unknown as Record<
+                    string,
+                    unknown
+                  >
+                )
+              }
+            >
+              <FileText className="size-4" />
+              Scene synopsis
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                createNode(
+                  "shot-list",
+                  defaultShotListContent() as unknown as Record<string, unknown>
+                )
+              }
+            >
+              <Clapperboard className="size-4" />
+              Shot list
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                createNode(
+                  "performance-notes",
+                  defaultPerformanceNotesContent() as unknown as Record<
+                    string,
+                    unknown
+                  >
+                )
+              }
+            >
+              <Table2 className="size-4" />
+              Performance notes
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                createNode(
+                  "image-grid",
+                  defaultImageGridContent() as unknown as Record<string, unknown>
+                )
+              }
+            >
+              <LayoutGrid className="size-4" />
+              Image grid
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => createNode("text", { text: "" })}
             >
@@ -835,19 +1012,19 @@ function InstinctCanvasInner({
               <Link2 className="size-4" />
               Video / reference link
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() =>
-                createNode("mood", {
-                  mood: "",
-                  color: "#34d399",
-                })
-              }
-            >
-              <Sparkles className="size-4" />
-              Mood tag
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <CanvasTemplatesMenu
+          projectId={projectId}
+          sceneId={sceneId}
+          scripts={scripts}
+          scenes={scenes}
+          onApplied={(appliedIds) => {
+            if (sceneId && appliedIds.includes(sceneId)) {
+              void reloadCanvas();
+            }
+          }}
+        />
         <input
           ref={imageInputRef}
           type="file"
@@ -882,7 +1059,45 @@ function InstinctCanvasInner({
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setPendingDeleteId(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
+          <DialogHeader>
+            <DialogTitle>Delete from canvas?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              {canvasDeleteLabel(pendingDeleteNode)} from the canvas? This
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between gap-4 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleting}
+              onClick={() => void confirmDelete()}
+              className="text-destructive hover:bg-destructive hover:text-white"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setPendingDeleteId(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+    </MultiImagePickProvider>
   );
 }
 
@@ -891,6 +1106,8 @@ export function InstinctCanvas(props: {
   sceneId: string | null;
   sceneHeading: string | null;
   initialNodes: CanvasNode[];
+  scripts: Script[];
+  scenes: Scene[];
 }) {
   return (
     <ReactFlowProvider>

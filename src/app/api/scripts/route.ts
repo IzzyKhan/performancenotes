@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
-import { extractPdfTextWithLines } from "@/lib/pdf";
 import { requireProjectAccess } from "@/lib/auth-guard";
-import { parseMultipartForm } from "@/lib/multipart";
+import { parseSceneSlugList } from "@/lib/scene-slug";
 import {
-  createScriptWithScenes,
+  createScriptWithSceneSlugs,
   listScriptsForProject,
 } from "@/lib/scripts";
 
 export const runtime = "nodejs";
-/** Large shooting-script PDFs can take a while to parse on Railway. */
 export const maxDuration = 120;
+
+const SLUG_ONLY_HINT =
+  "Parse the PDF in your browser and send scene headings as JSON (scenes array). We do not accept script files or body text on the server.";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -25,9 +26,8 @@ export async function GET(request: Request) {
 }
 
 /**
- * Add a script (episode) to a project. Accepts JSON
- * { projectId, title?, episodeNumber?, rawText, sourceType? }
- * or multipart { projectId, title?, episodeNumber?, file }.
+ * Add a script (episode) to a project.
+ * JSON: { projectId, title?, episodeNumber?, sourceType, scenes: SceneSlugPayload[] }
  */
 export async function POST(request: Request) {
   console.info(
@@ -38,93 +38,42 @@ export async function POST(request: Request) {
   try {
     const contentType = request.headers.get("content-type") || "";
 
-    let projectId: string;
-    let title: string;
-    let episodeNumber: number | undefined;
-    let rawText: string;
-    let sourceType: "pdf" | "typed";
-
     if (contentType.includes("multipart/form-data")) {
-      const formOrErr = await parseMultipartForm(request);
-      if (formOrErr instanceof NextResponse) return formOrErr;
-      const form = formOrErr;
-      projectId = String(form.get("projectId") || "");
-      title = String(form.get("title") || "").trim();
-      const epRaw = String(form.get("episodeNumber") || "").trim();
-      episodeNumber = epRaw ? Number(epRaw) : undefined;
-      const file = form.get("file");
+      return NextResponse.json({ error: SLUG_ONLY_HINT }, { status: 400 });
+    }
 
-      if (!projectId || !(file instanceof File)) {
-        return NextResponse.json(
-          { error: "projectId and PDF file are required" },
-          { status: 400 }
-        );
-      }
+    const body = await request.json();
+    const projectId =
+      typeof body.projectId === "string" ? body.projectId.trim() : "";
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const episodeNumber =
+      typeof body.episodeNumber === "number"
+        ? body.episodeNumber
+        : typeof body.episodeNumber === "string" && body.episodeNumber.trim()
+          ? Number(body.episodeNumber)
+          : undefined;
+    const sourceType = body.sourceType === "pdf" ? "pdf" : "typed";
+    const slugs = parseSceneSlugList(body.scenes);
 
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const started = Date.now();
-      console.info(
-        `[api/scripts POST] parsing PDF name="${file.name}" bytes=${buffer.length}`
+    if (typeof body.rawText === "string" && body.rawText.trim()) {
+      return NextResponse.json({ error: SLUG_ONLY_HINT }, { status: 400 });
+    }
+
+    if (!projectId || !slugs) {
+      return NextResponse.json(
+        { error: `projectId and scenes[] are required. ${SLUG_ONLY_HINT}` },
+        { status: 400 }
       );
-      try {
-        rawText = await extractPdfTextWithLines(new Uint8Array(buffer));
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "PDF parse failed";
-        console.error(
-          `[api/scripts POST] failed: PDF parse (name="${file.name}", bytes=${buffer.length})`,
-          err
-        );
-        return NextResponse.json(
-          {
-            error: `Could not read that PDF (${message}). Try a smaller file or paste text instead.`,
-          },
-          { status: 400 }
-        );
-      }
-      sourceType = "pdf";
-      if (!title) {
-        title = file.name.replace(/\.pdf$/i, "").trim() || "Episode";
-      }
-      console.info(
-        `[api/scripts POST] PDF extracted ${title}: ${(buffer.length / 1024 / 1024).toFixed(1)}MB, ${Date.now() - started}ms`
-      );
-
-      if (!rawText) {
-        return NextResponse.json(
-          { error: "Could not extract text from PDF" },
-          { status: 400 }
-        );
-      }
-    } else {
-      const body = await request.json();
-      projectId = body.projectId;
-      title = typeof body.title === "string" ? body.title.trim() : "";
-      episodeNumber =
-        typeof body.episodeNumber === "number"
-          ? body.episodeNumber
-          : typeof body.episodeNumber === "string" && body.episodeNumber.trim()
-            ? Number(body.episodeNumber)
-            : undefined;
-      rawText = (body.rawText as string)?.trim();
-      sourceType = body.sourceType === "pdf" ? "pdf" : "typed";
-
-      if (!projectId || !rawText) {
-        return NextResponse.json(
-          { error: "projectId and rawText are required" },
-          { status: 400 }
-        );
-      }
     }
 
     const access = await requireProjectAccess(projectId);
     if ("error" in access) return access.error;
 
     const saveStarted = Date.now();
-    const result = createScriptWithScenes({
+    const result = createScriptWithSceneSlugs({
       projectId,
-      title,
-      rawText,
+      title: title || "Episode",
+      slugs,
       sourceType,
       episodeNumber:
         typeof episodeNumber === "number" && !Number.isNaN(episodeNumber)
@@ -132,7 +81,7 @@ export async function POST(request: Request) {
           : undefined,
     });
     console.info(
-      `[api/scripts POST] Saved ${title}: ${result.sceneCount} scenes, ${Date.now() - saveStarted}ms`
+      `[api/scripts POST] Saved ${result.script.title}: ${result.sceneCount} scenes, ${Date.now() - saveStarted}ms`
     );
 
     return NextResponse.json(result, {

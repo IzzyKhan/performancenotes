@@ -271,6 +271,26 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             <ThemeToggle className="text-muted-foreground" />
           </div>
         </div>
+        <div
+          className="pointer-events-none absolute inset-y-0 hidden items-center md:flex"
+          style={{ left: LEFT_PANEL_MIN, transform: "translateX(-100%)" }}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="pointer-events-auto gap-1.5 text-xs text-muted-foreground active:translate-y-0"
+            onClick={() => setLeftOpen((v) => !v)}
+            title={leftOpen ? "Hide scene panel" : "Show scene panel"}
+          >
+            {leftOpen ? (
+              <PanelLeftClose className="size-4" />
+            ) : (
+              <PanelLeftOpen className="size-4" />
+            )}
+            <span className="hidden sm:inline">Scene</span>
+          </Button>
+        </div>
         <div className="ml-auto flex items-center gap-1">
           {scenes.length > 0 ? (
             <ShootScheduleDialog
@@ -289,21 +309,6 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               variant="ghost"
             />
           ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-xs text-muted-foreground"
-            onClick={() => setLeftOpen((v) => !v)}
-            title={leftOpen ? "Hide scene panel" : "Show scene panel"}
-          >
-            {leftOpen ? (
-              <PanelLeftClose className="size-4" />
-            ) : (
-              <PanelLeftOpen className="size-4" />
-            )}
-            <span className="hidden sm:inline">Scene</span>
-          </Button>
           {AGENT_ENABLED ? (
             <Button
               type="button"
@@ -321,6 +326,26 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               )}
             </Button>
           ) : null}
+        </div>
+        <div
+          className="pointer-events-none absolute inset-y-0 flex items-center md:hidden"
+          style={{ left: "4.5rem" }}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="pointer-events-auto gap-1.5 text-xs text-muted-foreground active:translate-y-0"
+            onClick={() => setLeftOpen((v) => !v)}
+            title={leftOpen ? "Hide scene panel" : "Show scene panel"}
+          >
+            {leftOpen ? (
+              <PanelLeftClose className="size-4" />
+            ) : (
+              <PanelLeftOpen className="size-4" />
+            )}
+            <span>Scene</span>
+          </Button>
         </div>
       </header>
 
@@ -401,6 +426,8 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             initialNodes={bundle.canvasNodes.filter(
               (n) => n.sceneId === null || n.sceneId === activeSceneId
             )}
+            scripts={scripts}
+            scenes={scenes}
           />
         </main>
         {AGENT_ENABLED && rightOpen ? (
