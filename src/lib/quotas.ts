@@ -1,9 +1,7 @@
 /**
- * Per-user Claude usage quotas (Phase 4 scaffolding).
- * Enforced when AUTH_SECRET is set. Limits by plan:
- *   prep (default): 50 chat/distill calls per calendar month
- *   dramaturg: 500
- * Override with CHAT_QUOTA_PREP / CHAT_QUOTA_DRAMATURG.
+ * Per-user Claude usage quotas (Agent tier — Stage 7).
+ * Enforced when AUTH_SECRET is set. Free/Organize: agent off (0 quota).
+ * dramaturg: ~180 actions/mo at launch (override CHAT_QUOTA_DRAMATURG).
  */
 
 import { eq } from "drizzle-orm";
@@ -11,16 +9,16 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { nowIso } from "@/lib/id";
 import { authRequired } from "@/lib/auth-guard";
+import { entitlementsForPlan } from "@/lib/entitlements";
 
 function monthKey(d = new Date()): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function quotaForPlan(plan: string | null | undefined): number {
-  if (plan === "dramaturg") {
-    return Number(process.env.CHAT_QUOTA_DRAMATURG || 500);
-  }
-  return Number(process.env.CHAT_QUOTA_PREP || 50);
+  const ent = entitlementsForPlan(plan);
+  if (!ent.agentEnabled) return 0;
+  return Number(process.env.CHAT_QUOTA_DRAMATURG || ent.agentMonthlyActions);
 }
 
 export type QuotaResult =
@@ -63,7 +61,7 @@ export function checkAndIncrementChatQuota(userId: string): QuotaResult {
 /** Apply plan entitlement after Stripe webhook (Phase 4). */
 export function setUserPlan(
   userId: string,
-  plan: "prep" | "dramaturg" | null,
+  plan: "free" | "organize" | "dramaturg" | "prep" | null,
   stripeCustomerId?: string
 ) {
   db.update(users)
