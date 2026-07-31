@@ -11,7 +11,6 @@ import {
 } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { seedDemoIfEmpty } from "@/lib/seed";
-import { createScriptWithScenes } from "@/lib/scripts";
 import {
   authRequired,
   getOwnedProject,
@@ -50,6 +49,18 @@ export async function POST(request: Request) {
   const body = await request.json();
   const title = (body.title as string)?.trim() || "Untitled Project";
 
+  // Slug-only launch: this route creates the project shell only. Scripts are
+  // added via POST /api/scripts with client-parsed scene slugs.
+  if (body.rawText && typeof body.rawText === "string" && body.rawText.trim()) {
+    return NextResponse.json(
+      {
+        error:
+          "Script text is not accepted here. Create the project, then send client-parsed scene slugs to /api/scripts.",
+      },
+      { status: 400 }
+    );
+  }
+
   const project = {
     id: createId("proj"),
     userId: authRequired() ? authResult.user.id : null,
@@ -58,22 +69,6 @@ export async function POST(request: Request) {
   };
 
   db.insert(projects).values(project).run();
-
-  if (body.rawText && typeof body.rawText === "string" && body.rawText.trim()) {
-    const sourceType = body.sourceType === "pdf" ? "pdf" : "typed";
-    const scriptTitle =
-      typeof body.scriptTitle === "string" && body.scriptTitle.trim()
-        ? body.scriptTitle.trim()
-        : title;
-
-    createScriptWithScenes({
-      projectId: project.id,
-      title: scriptTitle,
-      rawText: body.rawText.trim(),
-      sourceType,
-      orderIndex: 0,
-    });
-  }
 
   return NextResponse.json(project, { status: 201 });
 }

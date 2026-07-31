@@ -37,6 +37,7 @@ yarn-error.log*
 # local app data
 /data/*.db
 /data/*.db-*
+/data/*.db.*
 /data/uploads/*
 /data/mock-exports/
 !/data/uploads/.gitkeep
