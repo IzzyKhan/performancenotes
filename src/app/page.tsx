@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { EditProjectDialog } from "@/components/project/edit-project-dialog";
+import { usePlan, UPGRADE_PROJECT_LIMIT_MESSAGE } from "@/lib/use-plan";
 import type { Project } from "@/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -16,8 +17,14 @@ import { cn } from "@/lib/utils";
 export default function HomePage() {
   const router = useRouter();
   const { data: session, status } = useSession();
+  const plan = usePlan();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const atProjectLimit =
+    plan !== null &&
+    plan.maxProjects !== null &&
+    projects.length >= plan.maxProjects;
 
   async function load() {
     setLoading(true);
@@ -97,13 +104,25 @@ export default function HomePage() {
                 Sign in
               </Link>
             ) : null}
-            <Link
-              href="/projects/new"
-              className={cn(buttonVariants(), "gap-1.5")}
-            >
-              <Plus className="size-3.5 stroke-[1.5]" />
-              New project
-            </Link>
+            {atProjectLimit ? (
+              <Button
+                type="button"
+                className="gap-1.5 opacity-50"
+                title={UPGRADE_PROJECT_LIMIT_MESSAGE}
+                onClick={() => toast.info(UPGRADE_PROJECT_LIMIT_MESSAGE)}
+              >
+                <Plus className="size-3.5 stroke-[1.5]" />
+                New project
+              </Button>
+            ) : (
+              <Link
+                href="/projects/new"
+                className={cn(buttonVariants(), "gap-1.5")}
+              >
+                <Plus className="size-3.5 stroke-[1.5]" />
+                New project
+              </Link>
+            )}
           </div>
         </div>
 
@@ -117,8 +136,7 @@ export default function HomePage() {
           <Card className="border-dashed bg-transparent">
             <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
               <p className="max-w-sm text-sm text-muted-foreground">
-                No projects yet. Create one to get started — a demo scene will
-                also appear when you sign up.
+                No projects yet. Create one to get started.
               </p>
               <Link href="/projects/new" className={buttonVariants()}>
                 Create your first project

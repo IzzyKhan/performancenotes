@@ -44,11 +44,16 @@ export function AddScriptDialog({
   projectId,
   scripts,
   disabled,
+  locked,
+  lockedMessage,
   onAdded,
 }: {
   projectId: string;
   scripts: Script[];
   disabled?: boolean;
+  /** Plan limit reached — grey the trigger and prompt to upgrade on click. */
+  locked?: boolean;
+  lockedMessage?: string;
   onAdded: (scriptId?: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
@@ -125,6 +130,25 @@ export function AddScriptDialog({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (locked) {
+    const message =
+      lockedMessage ??
+      "Upgrade to Organize to add more episodes to this project.";
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="gap-1.5 opacity-50"
+        title={message}
+        onClick={() => toast.info(message)}
+      >
+        <Plus className="size-3.5" />
+        Add episode
+      </Button>
+    );
   }
 
   return (

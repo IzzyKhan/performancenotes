@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Clapperboard, FileUp, Plus, Trash2, Type, Tv } from "lucide-react";
@@ -16,6 +16,11 @@ import {
   parseTypedTextToSlugs,
 } from "@/lib/client-script-parse";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  usePlan,
+  UPGRADE_PROJECT_LIMIT_MESSAGE,
+  UPGRADE_SCRIPT_LIMIT_MESSAGE,
+} from "@/lib/use-plan";
 
 type ProjectKind = "single" | "series";
 
@@ -152,10 +157,33 @@ async function uploadScriptPdf(
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const plan = usePlan();
   const [kind, setKind] = useState<ProjectKind | null>(null);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(false);
   const [drafts, setDrafts] = useState<ScriptDraft[]>([emptyDraft(0)]);
+  const [projectCount, setProjectCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/projects")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setProjectCount(data.length);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const seriesLocked =
+    plan !== null && plan.maxScriptsPerProject !== null;
+  const atProjectLimit =
+    plan !== null &&
+    plan.maxProjects !== null &&
+    projectCount !== null &&
+    projectCount >= plan.maxProjects;
 
   function updateDraft(key: string, patch: Partial<ScriptDraft>) {
     setDrafts((prev) =>
@@ -321,7 +349,22 @@ export default function NewProjectPage() {
               : "Name the series block and add episodes now, or leave them empty and upload later."}
         </p>
 
-        <div className="mt-8 space-y-6">
+        {atProjectLimit ? (
+          <div className="mt-8 rounded-md border border-border bg-muted/30 px-4 py-5">
+            <p className="text-sm font-medium">You&apos;re at the Free plan limit</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {UPGRADE_PROJECT_LIMIT_MESSAGE}
+            </p>
+            <Link
+              href="/"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-4")}
+            >
+              Back to your project
+            </Link>
+          </div>
+        ) : null}
+
+        <div className={cn("mt-8 space-y-6", atProjectLimit && "hidden")}>
           <div className="space-y-2">
             <Label>Project type</Label>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -345,12 +388,22 @@ export default function NewProjectPage() {
               </button>
               <button
                 type="button"
-                onClick={() => chooseKind("series")}
+                aria-disabled={seriesLocked}
+                title={seriesLocked ? UPGRADE_SCRIPT_LIMIT_MESSAGE : undefined}
+                onClick={() => {
+                  if (seriesLocked) {
+                    toast.info(UPGRADE_SCRIPT_LIMIT_MESSAGE);
+                    return;
+                  }
+                  chooseKind("series");
+                }}
                 className={cn(
                   "flex flex-col items-start gap-1 rounded-md border px-3 py-3 text-left transition-colors",
-                  kind === "series"
-                    ? "border-foreground bg-accent/50"
-                    : "border-border hover:bg-accent/40"
+                  seriesLocked
+                    ? "cursor-not-allowed border-border opacity-50"
+                    : kind === "series"
+                      ? "border-foreground bg-accent/50"
+                      : "border-border hover:bg-accent/40"
                 )}
               >
                 <span className="flex items-center gap-2 text-sm font-medium">
@@ -358,7 +411,9 @@ export default function NewProjectPage() {
                   Series / multi-script
                 </span>
                 <span className="text-xs font-normal text-muted-foreground">
-                  Episodes with numbers and titles
+                  {seriesLocked
+                    ? "Organize plan — unlimited episodes"
+                    : "Episodes with numbers and titles"}
                 </span>
               </button>
             </div>

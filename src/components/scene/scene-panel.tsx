@@ -29,6 +29,7 @@ import { AddScriptDialog } from "@/components/project/add-script-dialog";
 import { ReplaceScriptDialog } from "@/components/project/replace-script-dialog";
 import type { SceneDiffEntry } from "@/lib/script-diff";
 import { sceneSlugLabel, shootDayOrderLabel } from "@/lib/schedule";
+import { usePlan, UPGRADE_SCRIPT_LIMIT_MESSAGE } from "@/lib/use-plan";
 import { cn } from "@/lib/utils";
 
 export function ScenePanel({
@@ -52,6 +53,7 @@ export function ScenePanel({
   onActiveScriptChange: (scriptId: string) => void;
   onActiveSceneChange: (sceneId: string) => void;
 }) {
+  const plan = usePlan();
   const activeScript = scripts.find((s) => s.id === activeScriptId) ?? null;
   const scriptScenes = activeScriptId
     ? scenes
@@ -363,6 +365,12 @@ export function ScenePanel({
                 projectId={projectId}
                 scripts={scripts}
                 disabled={uploading}
+                locked={
+                  plan !== null &&
+                  plan.maxScriptsPerProject !== null &&
+                  scripts.length >= plan.maxScriptsPerProject
+                }
+                lockedMessage={UPGRADE_SCRIPT_LIMIT_MESSAGE}
                 onAdded={async (scriptId) => {
                   await syncProjectData(scriptId);
                 }}
