@@ -145,6 +145,9 @@ function migrate(sqlite: Database.Database) {
   ensureColumn("users", "chat_usage_count", "chat_usage_count INTEGER NOT NULL DEFAULT 0");
   ensureColumn("users", "chat_usage_reset_at", "chat_usage_reset_at TEXT");
 
+  // Stage 2: legacy dev plan slug -> launch tier
+  sqlite.exec(`UPDATE users SET plan = 'organize' WHERE plan = 'prep'`);
+
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS canvas_templates (
       id TEXT PRIMARY KEY,

@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { seedDemoIfEmpty } from "@/lib/seed";
+import { checkProjectCreateAllowed } from "@/lib/entitlement-guard";
 import {
   authRequired,
   getOwnedProject,
@@ -60,6 +61,9 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const allowed = checkProjectCreateAllowed(authResult.user.id);
+  if (!allowed.ok) return allowed.error;
 
   const project = {
     id: createId("proj"),

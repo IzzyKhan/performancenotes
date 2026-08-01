@@ -45,7 +45,10 @@ Positioning: short-film prep done really well. Features/series can still use it 
 - [x] **Stage 1:** Slug-only ingest, client parse, empty `rawText` on server
   - Legacy full-text paths closed: `POST /api/projects` rejects `rawText`; `/api/projects/with-scripts` (server-side PDF parse) deleted; scenes `PATCH` rejects body text.
   - Dev DB audited + scrubbed (legacy scene bodies and `parsed_meta` blanked). **Production deploys with pre-Stage-1 data need the same one-off scrub** (`UPDATE scenes SET raw_text = '', parsed_meta = NULL`).
-- [ ] **Stage 2:** Enforce Free/Organize entitlements (projects, scripts, agent off)
+- [x] **Stage 2:** Enforce Free/Organize entitlements (projects, scripts, agent off)
+  - `src/lib/entitlement-guard.ts` — 403 `plan_limit` on project create (`/api/projects`) and script create (`/api/scripts`, `/api/scenes`) past plan limits. Skipped when auth is off (local dev).
+  - Agent stays off via `NEXT_PUBLIC_ENABLE_AGENT` + zero chat quota for Free/Organize.
+  - Legacy `plan = 'prep'` rows normalize to `'organize'` on DB open.
 - [ ] **Stage 3:** Upload copy, scene panel (no server screenplay reader), replace-script UX polish
 - [ ] **Stage 4:** Stripe Checkout + Portal for Organize $15 only
 - [ ] **Stage 5:** Turso/Neon + R2, backups, staging smoke

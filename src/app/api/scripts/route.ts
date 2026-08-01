@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireProjectAccess } from "@/lib/auth-guard";
+import { checkScriptCreateAllowed } from "@/lib/entitlement-guard";
 import { parseSceneSlugList } from "@/lib/scene-slug";
 import {
   createScriptWithSceneSlugs,
@@ -68,6 +69,9 @@ export async function POST(request: Request) {
 
     const access = await requireProjectAccess(projectId);
     if ("error" in access) return access.error;
+
+    const allowed = checkScriptCreateAllowed(access.user.id, projectId);
+    if (!allowed.ok) return allowed.error;
 
     const saveStarted = Date.now();
     const result = createScriptWithSceneSlugs({

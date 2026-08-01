@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { scenes, scripts } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
+import { checkScriptCreateAllowed } from "@/lib/entitlement-guard";
 import { mapScene } from "@/lib/mappers";
 import { parseSlugIngestBody } from "@/lib/scene-slug";
 import {
@@ -138,6 +139,9 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ scriptId, sceneCount }, { status: 201 });
   }
+
+  const allowed = checkScriptCreateAllowed(access.user.id, projectId);
+  if (!allowed.ok) return allowed.error;
 
   const result = createScriptWithSceneSlugs({
     projectId,
