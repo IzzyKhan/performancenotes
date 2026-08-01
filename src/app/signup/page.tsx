@@ -40,7 +40,7 @@ export default function SignupPage() {
         router.push("/login");
         return;
       }
-      toast.success("Welcome — demo project ready");
+      toast.success("Welcome — create your first project");
       router.push("/");
       router.refresh();
     } finally {

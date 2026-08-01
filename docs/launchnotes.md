@@ -48,6 +48,7 @@ Positioning: short-film prep done really well. Features/series can still use it 
 - [x] **Stage 2:** Enforce Free/Organize entitlements (projects, scripts, agent off)
   - `src/lib/entitlement-guard.ts` — 403 `plan_limit` on project create (`/api/projects`) and script create (`/api/scripts`, `/api/scenes`) past plan limits. Skipped when auth is off (local dev).
   - Agent stays off via `NEXT_PUBLIC_ENABLE_AGENT` + zero chat quota for Free/Organize.
+  - Signup defaults to Free (`plan` null) — no demo project seeded (would consume the 1-project quota).
   - Legacy `plan = 'prep'` rows normalize to `'organize'` on DB open.
 - [ ] **Stage 3:** Upload copy, scene panel (no server screenplay reader), replace-script UX polish
 - [ ] **Stage 4:** Stripe Checkout + Portal for Organize $15 only

@@ -5,7 +5,6 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { authRequired } from "@/lib/auth-guard";
-import { seedDemoForUser } from "@/lib/seed";
 
 export const runtime = "nodejs";
 
@@ -55,12 +54,10 @@ export async function POST(request: Request) {
       email,
       passwordHash,
       createdAt: nowIso(),
-      plan: "prep",
+      plan: null,
       chatUsageCount: 0,
     })
     .run();
-
-  seedDemoForUser(id);
 
   return NextResponse.json({ id, email }, { status: 201 });
 }
