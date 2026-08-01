@@ -313,7 +313,7 @@ export function splitScenes(rawText: string): SplitScene[] {
   }
 
   if (headingIndexes.length === 0) {
-    return [{ heading: "Scene 1", text: normalized.trim(), sceneNumber: null }];
+    return [];
   }
 
   if (headingIndexes.length === 1) {

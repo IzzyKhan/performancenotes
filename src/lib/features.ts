@@ -9,3 +9,8 @@
 export function isAgentEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ENABLE_AGENT === "true";
 }
+
+/** Organize $15 Checkout + upgrade CTAs (Stage 4). Off until Stripe is live. */
+export function isOrganizeCheckoutEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_ORGANIZE_CHECKOUT === "true";
+}

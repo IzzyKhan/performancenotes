@@ -20,6 +20,7 @@ import {
   usePlan,
   UPGRADE_PROJECT_LIMIT_MESSAGE,
   UPGRADE_SCRIPT_LIMIT_MESSAGE,
+  showOrganizeUpgradeUI,
 } from "@/lib/use-plan";
 
 type ProjectKind = "single" | "series";
@@ -106,11 +107,13 @@ async function uploadScriptPdf(
   epNum: number,
   scriptTitle: string,
   file: File
-): Promise<{ sceneCount?: number }> {
+): Promise<{ sceneCount?: number; sceneNumberWarning?: string | null }> {
   const parsed = await parsePdfFileToSlugs(await snapshotFile(file));
   if (!parsed.ok) {
     throw new Error(parsed.error);
   }
+
+  const sceneNumberWarning = parsed.sceneNumberWarning;
 
   const alreadySaved = async () => {
     const scripts = await listProjectScripts(projectId);
@@ -139,9 +142,12 @@ async function uploadScriptPdf(
           retries: 0,
         }
       );
-      return data as { sceneCount?: number };
+      return {
+        ...(data as { sceneCount?: number }),
+        sceneNumberWarning,
+      };
     } catch (e) {
-      if (await alreadySaved()) return {};
+      if (await alreadySaved()) return { sceneNumberWarning };
       if (e instanceof UploadError && e.status !== undefined && ![502, 503, 504].includes(e.status)) {
         throw e;
       }
@@ -275,6 +281,9 @@ export default function NewProjectPage() {
                     : `Episode ${epNum} uploaded`,
                 { id: progress }
               );
+              if (data.sceneNumberWarning) {
+                toast.info(data.sceneNumberWarning);
+              }
             } else {
               const parsed = parseTypedTextToSlugs(d.text.trim());
               if (!parsed.ok) {
@@ -295,6 +304,9 @@ export default function NewProjectPage() {
                 kind === "single" ? "Script saved" : `Episode ${epNum} uploaded`,
                 { id: progress }
               );
+              if (parsed.sceneNumberWarning) {
+                toast.info(parsed.sceneNumberWarning);
+              }
             }
           } catch (e) {
             toast.dismiss(progress);
@@ -353,7 +365,9 @@ export default function NewProjectPage() {
           <div className="mt-8 rounded-md border border-border bg-muted/30 px-4 py-5">
             <p className="text-sm font-medium">You&apos;re at the Free plan limit</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {UPGRADE_PROJECT_LIMIT_MESSAGE}
+              {showOrganizeUpgradeUI()
+                ? UPGRADE_PROJECT_LIMIT_MESSAGE
+                : "The Free plan includes one project."}
             </p>
             <Link
               href="/"
@@ -367,7 +381,14 @@ export default function NewProjectPage() {
         <div className={cn("mt-8 space-y-6", atProjectLimit && "hidden")}>
           <div className="space-y-2">
             <Label>Project type</Label>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div
+              className={cn(
+                "grid gap-2",
+                seriesLocked && showOrganizeUpgradeUI()
+                  ? "sm:grid-cols-2"
+                  : "sm:grid-cols-1"
+              )}
+            >
               <button
                 type="button"
                 onClick={() => chooseKind("single")}
@@ -386,24 +407,17 @@ export default function NewProjectPage() {
                   Feature, short film, or one-off scene
                 </span>
               </button>
+              {seriesLocked && showOrganizeUpgradeUI() ? (
               <button
                 type="button"
                 aria-disabled={seriesLocked}
-                title={seriesLocked ? UPGRADE_SCRIPT_LIMIT_MESSAGE : undefined}
+                title={UPGRADE_SCRIPT_LIMIT_MESSAGE}
                 onClick={() => {
-                  if (seriesLocked) {
-                    toast.info(UPGRADE_SCRIPT_LIMIT_MESSAGE);
-                    return;
-                  }
-                  chooseKind("series");
+                  toast.info(UPGRADE_SCRIPT_LIMIT_MESSAGE);
                 }}
                 className={cn(
                   "flex flex-col items-start gap-1 rounded-md border px-3 py-3 text-left transition-colors",
-                  seriesLocked
-                    ? "cursor-not-allowed border-border opacity-50"
-                    : kind === "series"
-                      ? "border-foreground bg-accent/50"
-                      : "border-border hover:bg-accent/40"
+                  "cursor-not-allowed border-border opacity-50"
                 )}
               >
                 <span className="flex items-center gap-2 text-sm font-medium">
@@ -411,11 +425,29 @@ export default function NewProjectPage() {
                   Series / multi-script
                 </span>
                 <span className="text-xs font-normal text-muted-foreground">
-                  {seriesLocked
-                    ? "Organize plan — unlimited episodes"
-                    : "Episodes with numbers and titles"}
+                  Organize plan — unlimited episodes
                 </span>
               </button>
+              ) : seriesLocked ? null : (
+              <button
+                type="button"
+                onClick={() => chooseKind("series")}
+                className={cn(
+                  "flex flex-col items-start gap-1 rounded-md border px-3 py-3 text-left transition-colors",
+                  kind === "series"
+                    ? "border-foreground bg-accent/50"
+                    : "border-border hover:bg-accent/40"
+                )}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Tv className="size-3.5 stroke-[1.5] text-muted-foreground" />
+                  Series / multi-script
+                </span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  Episodes with numbers and titles
+                </span>
+              </button>
+              )}
             </div>
           </div>
 

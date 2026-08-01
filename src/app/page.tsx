@@ -9,7 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { EditProjectDialog } from "@/components/project/edit-project-dialog";
-import { usePlan, UPGRADE_PROJECT_LIMIT_MESSAGE } from "@/lib/use-plan";
+import { usePlan, UPGRADE_PROJECT_LIMIT_MESSAGE, showOrganizeUpgradeUI } from "@/lib/use-plan";
 import type { Project } from "@/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -105,15 +105,17 @@ export default function HomePage() {
               </Link>
             ) : null}
             {atProjectLimit ? (
-              <Button
-                type="button"
-                className="gap-1.5 opacity-50"
-                title={UPGRADE_PROJECT_LIMIT_MESSAGE}
-                onClick={() => toast.info(UPGRADE_PROJECT_LIMIT_MESSAGE)}
-              >
-                <Plus className="size-3.5 stroke-[1.5]" />
-                New project
-              </Button>
+              showOrganizeUpgradeUI() ? (
+                <Button
+                  type="button"
+                  className="gap-1.5 opacity-50"
+                  title={UPGRADE_PROJECT_LIMIT_MESSAGE}
+                  onClick={() => toast.info(UPGRADE_PROJECT_LIMIT_MESSAGE)}
+                >
+                  <Plus className="size-3.5 stroke-[1.5]" />
+                  New project
+                </Button>
+              ) : null
             ) : (
               <Link
                 href="/projects/new"

@@ -68,6 +68,7 @@ export function ScenePanel({
     slugs: SceneSlugPayload[];
     sourceType: SceneSourceType;
     diff: SceneDiffEntry[];
+    sceneNumberWarning: string | null;
   } | null>(null);
   const [applyingReplace, setApplyingReplace] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -128,6 +129,7 @@ export function ScenePanel({
             ? `Imported ${data.sceneCount} scenes`
             : "Scene slugs saved"
         );
+        if (parsed.sceneNumberWarning) toast.info(parsed.sceneNumberWarning);
       } else {
         const data = (await postWithRetry(
           "/api/scripts",
@@ -147,6 +149,7 @@ export function ScenePanel({
             ? `Imported ${data.sceneCount} scenes`
             : "Scene slugs saved"
         );
+        if (parsed.sceneNumberWarning) toast.info(parsed.sceneNumberWarning);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save scene");
@@ -178,6 +181,7 @@ export function ScenePanel({
           slugs: parsed.slugs,
           sourceType: parsed.sourceType,
           diff,
+          sceneNumberWarning: parsed.sceneNumberWarning,
         });
         return;
       }
@@ -199,6 +203,7 @@ export function ScenePanel({
           ? `Episode replaced — ${data.sceneCount} scenes`
           : "Episode replaced"
       );
+      if (parsed.sceneNumberWarning) toast.info(parsed.sceneNumberWarning);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "PDF upload failed");
     } finally {
@@ -221,6 +226,7 @@ export function ScenePanel({
         }),
         { label: "PDF replace", timeoutMs: 60_000 }
       )) as { sceneCount?: number; transferred?: number };
+      const sceneNumberWarning = pendingReplace.sceneNumberWarning;
       setPendingReplace(null);
       await syncProjectData(activeScriptId);
       setImportOpen(false);
@@ -233,6 +239,7 @@ export function ScenePanel({
             : `Revision applied — ${n} scenes`
           : "Revision applied"
       );
+      if (sceneNumberWarning) toast.info(sceneNumberWarning);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to apply revision");
     } finally {

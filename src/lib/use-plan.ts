@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isOrganizeCheckoutEnabled } from "@/lib/features";
 
 export type PlanInfo = {
   email: string;
@@ -43,3 +44,8 @@ export const UPGRADE_PROJECT_LIMIT_MESSAGE =
 
 export const UPGRADE_SCRIPT_LIMIT_MESSAGE =
   "The Free plan includes 1 script per project. Upgrade to Organize for episodic prep with unlimited episodes.";
+
+/** When false, hide Organize-tier controls instead of showing upgrade toasts. */
+export function showOrganizeUpgradeUI(): boolean {
+  return isOrganizeCheckoutEnabled();
+}

@@ -23,6 +23,7 @@ import {
 import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { toast } from "sonner";
 import type { Script } from "@/types";
+import { showOrganizeUpgradeUI } from "@/lib/use-plan";
 
 function nextEpisodeNumber(scripts: Script[]): number {
   if (scripts.length === 0) return 1;
@@ -122,6 +123,9 @@ export function AddScriptDialog({
           : "Episode added",
         { id: progress }
       );
+      if (parsed.sceneNumberWarning) {
+        toast.info(parsed.sceneNumberWarning);
+      }
       setOpen(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add episode", {
@@ -133,6 +137,7 @@ export function AddScriptDialog({
   }
 
   if (locked) {
+    if (!showOrganizeUpgradeUI()) return null;
     const message =
       lockedMessage ??
       "Upgrade to Organize to add more episodes to this project.";

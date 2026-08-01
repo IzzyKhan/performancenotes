@@ -6,13 +6,33 @@ import {
 import type { SceneSourceType } from "@/types";
 
 export type ClientParseResult =
-  | { ok: true; slugs: SceneSlugPayload[]; sourceType: SceneSourceType }
+  | {
+      ok: true;
+      slugs: SceneSlugPayload[];
+      sourceType: SceneSourceType;
+      sceneNumberWarning: string | null;
+    }
   | { ok: false; error: string };
 
 function noScenesError(sourceType: SceneSourceType): string {
   return sourceType === "pdf"
-    ? "No scenes found — check that the PDF has INT./EXT. slug lines"
-    : "No scenes found — paste text with INT./EXT. slug lines";
+    ? "No scenes found — the script needs INT./EXT. scene headings (slug lines)."
+    : "No scenes found — paste text with INT./EXT. scene headings (slug lines).";
+}
+
+/** Warn when production numbers are missing from slug lines (import order is used). */
+export function sceneNumberImportWarning(
+  slugs: SceneSlugPayload[]
+): string | null {
+  if (slugs.length === 0) return null;
+  const missing = slugs.filter((s) => !s.sceneNumber?.trim()).length;
+  if (missing === slugs.length) {
+    return "No production scene numbers found — scenes are labeled 1, 2, 3… in import order.";
+  }
+  if (missing > 0) {
+    return `${missing} scene(s) had no production number — those use import order in the list.`;
+  }
+  return null;
 }
 
 export async function parsePdfFileToSlugs(file: File): Promise<ClientParseResult> {
@@ -37,7 +57,12 @@ export async function parsePdfFileToSlugs(file: File): Promise<ClientParseResult
     return { ok: false, error: noScenesError("pdf") };
   }
 
-  return { ok: true, slugs, sourceType: "pdf" };
+  return {
+    ok: true,
+    slugs,
+    sourceType: "pdf",
+    sceneNumberWarning: sceneNumberImportWarning(slugs),
+  };
 }
 
 export function parseTypedTextToSlugs(text: string): ClientParseResult {
@@ -51,5 +76,10 @@ export function parseTypedTextToSlugs(text: string): ClientParseResult {
     return { ok: false, error: noScenesError("typed") };
   }
 
-  return { ok: true, slugs, sourceType: "typed" };
+  return {
+    ok: true,
+    slugs,
+    sourceType: "typed",
+    sceneNumberWarning: sceneNumberImportWarning(slugs),
+  };
 }
