@@ -26,6 +26,8 @@ import {
   Plus,
   Table2,
   FileText,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -508,6 +510,8 @@ function InstinctCanvasInner({
   initialNodes,
   scripts,
   scenes,
+  scenePanelOpen,
+  onScenePanelToggle,
 }: {
   projectId: string;
   sceneId: string | null;
@@ -515,6 +519,8 @@ function InstinctCanvasInner({
   initialNodes: CanvasNode[];
   scripts: Script[];
   scenes: Scene[];
+  scenePanelOpen: boolean;
+  onScenePanelToggle: () => void;
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const { resolvedTheme } = useTheme();
@@ -1025,6 +1031,21 @@ function InstinctCanvasInner({
             }
           }}
         />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 border-border bg-card px-2.5 text-xs font-normal shadow-none"
+          onClick={onScenePanelToggle}
+          title={scenePanelOpen ? "Hide scene panel" : "Show scene panel"}
+        >
+          {scenePanelOpen ? (
+            <PanelLeftClose className="size-3.5" />
+          ) : (
+            <PanelLeftOpen className="size-3.5" />
+          )}
+          Scene list
+        </Button>
         <input
           ref={imageInputRef}
           type="file"
@@ -1108,6 +1129,8 @@ export function InstinctCanvas(props: {
   initialNodes: CanvasNode[];
   scripts: Script[];
   scenes: Scene[];
+  scenePanelOpen: boolean;
+  onScenePanelToggle: () => void;
 }) {
   return (
     <ReactFlowProvider>

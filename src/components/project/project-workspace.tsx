@@ -7,8 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
-  PanelLeftClose,
-  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Sparkles,
@@ -256,11 +254,11 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
       <header className="relative flex h-12 shrink-0 items-center gap-3 border-b border-border px-3 print:hidden">
         <Link
           href="/"
-          className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+          className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "shrink-0")}
         >
           <ArrowLeft className="size-4" />
         </Link>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 pr-8">
           <Clapperboard className="size-4 shrink-0 stroke-[1.5] text-muted-foreground" />
           <h1 className="truncate text-sm font-medium tracking-tight">
             {bundle.project.title}
@@ -271,27 +269,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             <ThemeToggle className="text-muted-foreground" />
           </div>
         </div>
-        <div
-          className="pointer-events-none absolute inset-y-0 hidden items-center md:flex"
-          style={{ left: LEFT_PANEL_MIN, transform: "translateX(-100%)" }}
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="pointer-events-auto gap-1.5 text-xs text-muted-foreground active:translate-y-0"
-            onClick={() => setLeftOpen((v) => !v)}
-            title={leftOpen ? "Hide scene panel" : "Show scene panel"}
-          >
-            {leftOpen ? (
-              <PanelLeftClose className="size-4" />
-            ) : (
-              <PanelLeftOpen className="size-4" />
-            )}
-            <span className="hidden sm:inline">Scene</span>
-          </Button>
-        </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="relative z-10 ml-auto flex shrink-0 items-center gap-1">
           {scenes.length > 0 ? (
             <ShootScheduleDialog
               projectId={bundle.project.id}
@@ -326,26 +304,6 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               )}
             </Button>
           ) : null}
-        </div>
-        <div
-          className="pointer-events-none absolute inset-y-0 flex items-center md:hidden"
-          style={{ left: "4.5rem" }}
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="pointer-events-auto gap-1.5 text-xs text-muted-foreground active:translate-y-0"
-            onClick={() => setLeftOpen((v) => !v)}
-            title={leftOpen ? "Hide scene panel" : "Show scene panel"}
-          >
-            {leftOpen ? (
-              <PanelLeftClose className="size-4" />
-            ) : (
-              <PanelLeftOpen className="size-4" />
-            )}
-            <span>Scene</span>
-          </Button>
         </div>
       </header>
 
@@ -428,6 +386,8 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
             )}
             scripts={scripts}
             scenes={scenes}
+            scenePanelOpen={leftOpen}
+            onScenePanelToggle={() => setLeftOpen((v) => !v)}
           />
         </main>
         {AGENT_ENABLED && rightOpen ? (
