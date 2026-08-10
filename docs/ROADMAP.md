@@ -1,6 +1,8 @@
 # Roadmap: Railway pilot → worldwide SaaS
 
 This document is the forward plan after Phase 1 (Railway + volume + Basic Auth).  
+**Current launch strategy:** finish build-out (Stages 4–6) before director access — see [`docs/launchnotes.md`](launchnotes.md).
+
 Do **not** skip ahead: auth without ownership checks, or public signup on a shared SQLite volume, creates painful migrations.
 
 ```mermaid
@@ -14,10 +16,10 @@ flowchart LR
 
 | When | Phase |
 |------|--------|
-| Now | **Phase 1** — Railway + volume + Basic Auth (implemented) |
-| After first director feedback | **Phase 2** — per-director accounts |
-| Concurrent users / no single-volume limit | **Phase 3** — hosted DB + blob storage |
-| Public launch / charging | **Phase 4** — signup, Stripe, quotas |
+| Done | **Phase 1** — Railway + volume + Basic Auth |
+| Done | **Phase 2** — per-director accounts |
+| **Now** | **Phase 3** — Turso wired (5a); R2 + drop volume still open (5b) |
+| After build-out + director feedback | **Phase 4** — public signup, Stripe live, in-app feedback, quotas |
 
 ---
 
@@ -58,26 +60,34 @@ flowchart LR
 
 ## Phase 3 — Durable cloud backend
 
-**Status:** Storage abstraction stubbed ([`src/lib/storage.ts`](../src/lib/storage.ts)); local volume remains default.
+**Status:** Storage abstraction stubbed ([`src/lib/storage.ts`](../src/lib/storage.ts)); local volume remains default. **Blocker before director access.**
 
 ### Checklist
-- [ ] Choose Turso vs Neon; wire Drizzle client (replace `better-sqlite3`)
-- [ ] Migrate schema + data
+- [x] **PDF export polish** — blank pages, layout, preview UX (`src/app/api/export/route.tsx`) — see launchnotes Stage 3b
+- [x] Choose Turso; wire Drizzle via `@libsql/client` (local `file:` or `TURSO_DATABASE_URL`)
+- [x] Schema bootstrap + legacy column migrations on `ensureDb()`
 - [x] Storage helper with local default (`putUploadObject` / `getUploadObject`)
 - [ ] Implement S3/R2 backend behind `S3_BUCKET`
 - [ ] Drop Railway volume dependency
-- [ ] Decide Railway vs Vercel for the Next.js app
+- [x] **Host decision:** stick with **Railway** for the Next.js app through public launch (see launchnotes Infrastructure)
+
+### Scale note
+
+Railway + Turso/Neon + R2 is sufficient for hundreds to low thousands of registered users. Single-region latency is acceptable for a prep tool; R2 serves media globally.
 
 ---
 
 ## Phase 4 — Public worldwide SaaS
 
-**Status:** Quota counters + plan fields on `users`; Stripe webhook route scaffolded at `/api/billing/webhook`.
+**Status:** Quota counters + plan fields on `users`; Stripe checkout/webhook scaffolded. Billing flag off until monetization gate.
 
 ### Checklist
 - [x] Per-user monthly Claude quota (`checkAndIncrementChatQuota`)
-- [x] Plan fields (`prep` / `dramaturg`) + Stripe customer id column
-- [ ] Install `stripe` and verify webhook signatures
-- [ ] Checkout + Customer Portal UI
+- [x] Plan fields (`free` / `solo` / `pro` / `dramaturg`) + Stripe customer id column
+- [x] Install `stripe` and verify webhook signatures
+- [ ] Checkout + Customer Portal UI (Solo checkout in scene panel still pending)
+- [ ] Stripe test-mode E2E (build-out); live checkout at monetization gate
 - [ ] Email verification + abuse rate limits
-- [ ] Staging environment, monitoring, legal pages
+- [ ] Staging environment smoke test
+- [ ] In-app feedback form (`/feedback`) before wider Free signup — see launchnotes Feedback section
+- [ ] Full legal pages before wide public launch

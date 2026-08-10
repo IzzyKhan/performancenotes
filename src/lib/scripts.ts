@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { db, sqlite } from "@/db";
+import { db } from "@/db";
 import {
   canvasNodes,
   chatMessages,
@@ -23,19 +23,23 @@ export type ScriptCreateResult = {
   sceneCount: number;
 };
 
-export function listScriptsForProject(projectId: string): Script[] {
-  return db
-    .select()
-    .from(scripts)
-    .where(eq(scripts.projectId, projectId))
-    .orderBy(asc(scripts.episodeNumber), asc(scripts.orderIndex))
-    .all()
-    .map(mapScript);
+export async function listScriptsForProject(projectId: string): Promise<Script[]> {
+  return (
+    await db
+      .select()
+      .from(scripts)
+      .where(eq(scripts.projectId, projectId))
+      .orderBy(asc(scripts.episodeNumber), asc(scripts.orderIndex))
+      .all()
+  ).map(mapScript);
 }
 
 /** Parse character/beat meta for scenes that were imported without it. */
-export function backfillParsedMeta(projectId: string, limit = 30): void {
-  const rows = db
+export async function backfillParsedMeta(
+  projectId: string,
+  limit = 30
+): Promise<void> {
+  const rows = await db
     .select({ id: scenes.id, rawText: scenes.rawText })
     .from(scenes)
     .where(and(eq(scenes.projectId, projectId), isNull(scenes.parsedMeta)))
@@ -43,7 +47,8 @@ export function backfillParsedMeta(projectId: string, limit = 30): void {
     .all();
 
   for (const row of rows) {
-    db.update(scenes)
+    await db
+      .update(scenes)
       .set({
         parsedMeta: JSON.stringify(parseScreenplayText(row.rawText)),
       })
@@ -52,19 +57,16 @@ export function backfillParsedMeta(projectId: string, limit = 30): void {
   }
 }
 
-export function listScenesForProject(projectId: string): Scene[] {
-  backfillParsedMeta(projectId);
+export async function listScenesForProject(projectId: string): Promise<Scene[]> {
+  await backfillParsedMeta(projectId);
 
-  const scriptRows = listScriptsForProject(projectId);
+  const scriptRows = await listScriptsForProject(projectId);
   const scriptOrder = new Map(
     scriptRows.map((s) => [s.id, s.episodeNumber * 1000 + s.orderIndex])
   );
-  const sceneRows = db
-    .select()
-    .from(scenes)
-    .where(eq(scenes.projectId, projectId))
-    .all()
-    .map(mapScene);
+  const sceneRows = (
+    await db.select().from(scenes).where(eq(scenes.projectId, projectId)).all()
+  ).map(mapScene);
 
   return sceneRows.sort((a, b) => {
     const ao = scriptOrder.get(a.scriptId) ?? 0;
@@ -74,8 +76,8 @@ export function listScenesForProject(projectId: string): Scene[] {
   });
 }
 
-export function nextScriptOrderIndex(projectId: string): number {
-  const rows = db
+export async function nextScriptOrderIndex(projectId: string): Promise<number> {
+  const rows = await db
     .select()
     .from(scripts)
     .where(eq(scripts.projectId, projectId))
@@ -84,8 +86,8 @@ export function nextScriptOrderIndex(projectId: string): number {
   return Math.max(...rows.map((r) => r.orderIndex)) + 1;
 }
 
-export function nextEpisodeNumber(projectId: string): number {
-  const rows = db
+export async function nextEpisodeNumber(projectId: string): Promise<number> {
+  const rows = await db
     .select()
     .from(scripts)
     .where(eq(scripts.projectId, projectId))
@@ -115,21 +117,22 @@ function sceneRowsFromSlugs(opts: {
   }));
 }
 
-export function createScriptWithSceneSlugs(opts: {
+export async function createScriptWithSceneSlugs(opts: {
   projectId: string;
   title: string;
   slugs: SceneSlugPayload[];
   sourceType: SceneSourceType;
   orderIndex?: number;
   episodeNumber?: number;
-}): ScriptCreateResult {
+}): Promise<ScriptCreateResult> {
   const now = nowIso();
   const scriptId = createId("script");
-  const orderIndex = opts.orderIndex ?? nextScriptOrderIndex(opts.projectId);
+  const orderIndex =
+    opts.orderIndex ?? (await nextScriptOrderIndex(opts.projectId));
   const episodeNumber =
     typeof opts.episodeNumber === "number" && opts.episodeNumber >= 1
       ? Math.floor(opts.episodeNumber)
-      : nextEpisodeNumber(opts.projectId);
+      : await nextEpisodeNumber(opts.projectId);
   const title = opts.title.trim() || `Episode ${episodeNumber}`;
 
   const sceneRows = sceneRowsFromSlugs({
@@ -140,8 +143,9 @@ export function createScriptWithSceneSlugs(opts: {
     now,
   });
 
-  sqlite.transaction(() => {
-    db.insert(scripts)
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(scripts)
       .values({
         id: scriptId,
         projectId: opts.projectId,
@@ -154,24 +158,24 @@ export function createScriptWithSceneSlugs(opts: {
       .run();
 
     for (const row of sceneRows) {
-      db.insert(scenes).values(row).run();
+      await tx.insert(scenes).values(row).run();
     }
-  })();
+  });
 
   const script = mapScript(
-    db.select().from(scripts).where(eq(scripts.id, scriptId)).get()!
+    (await db.select().from(scripts).where(eq(scripts.id, scriptId)).get())!
   );
 
   return { script, sceneCount: sceneRows.length };
 }
 
 /** Replace all scenes under a script from slug payloads (no script bodies). */
-export function replaceScriptSceneSlugs(opts: {
+export async function replaceScriptSceneSlugs(opts: {
   projectId: string;
   scriptId: string;
   slugs: SceneSlugPayload[];
   sourceType: SceneSourceType;
-}): number {
+}): Promise<number> {
   const now = nowIso();
   const sceneRows = sceneRowsFromSlugs({
     projectId: opts.projectId,
@@ -181,8 +185,8 @@ export function replaceScriptSceneSlugs(opts: {
     now,
   });
 
-  sqlite.transaction(() => {
-    const oldScenes = db
+  await db.transaction(async (tx) => {
+    const oldScenes = await tx
       .select({ id: scenes.id })
       .from(scenes)
       .where(
@@ -194,10 +198,11 @@ export function replaceScriptSceneSlugs(opts: {
       .all();
 
     for (const old of oldScenes) {
-      db.delete(cheatSheets).where(eq(cheatSheets.sceneId, old.id)).run();
+      await tx.delete(cheatSheets).where(eq(cheatSheets.sceneId, old.id)).run();
     }
 
-    db.delete(scenes)
+    await tx
+      .delete(scenes)
       .where(
         and(
           eq(scenes.projectId, opts.projectId),
@@ -206,58 +211,176 @@ export function replaceScriptSceneSlugs(opts: {
       )
       .run();
 
-    db.update(scripts)
+    await tx
+      .update(scripts)
       .set({ sourceType: opts.sourceType })
       .where(eq(scripts.id, opts.scriptId))
       .run();
 
     for (const row of sceneRows) {
-      db.insert(scenes).values(row).run();
+      await tx.insert(scenes).values(row).run();
     }
-  })();
+  });
 
   return sceneRows.length;
 }
 
 export type RemapTransferMap = Record<string, boolean>;
 
-function reassignSceneScopedData(oldId: string, newId: string) {
-  db.update(canvasNodes)
+/**
+ * Manually insert one scene after `afterSceneId` (or at the end of the script).
+ * For small edits the user would rather make by hand than re-upload a revision.
+ */
+export async function insertSceneAfter(opts: {
+  projectId: string;
+  scriptId: string;
+  heading: string;
+  sceneNumber: string | null;
+  afterSceneId?: string | null;
+}): Promise<Scene> {
+  const now = nowIso();
+  const newId = createId("scene");
+
+  await db.transaction(async (tx) => {
+    const siblings = (
+      await tx
+        .select()
+        .from(scenes)
+        .where(
+          and(
+            eq(scenes.projectId, opts.projectId),
+            eq(scenes.scriptId, opts.scriptId)
+          )
+        )
+        .all()
+    ).sort((a, b) => a.orderIndex - b.orderIndex);
+
+    const afterPos = opts.afterSceneId
+      ? siblings.findIndex((s) => s.id === opts.afterSceneId)
+      : -1;
+    const insertAt = afterPos >= 0 ? afterPos + 1 : siblings.length;
+
+    // Renumber from the tail so the shifted rows never collide mid-update.
+    for (let i = siblings.length - 1; i >= insertAt; i--) {
+      await tx
+        .update(scenes)
+        .set({ orderIndex: i + 1 })
+        .where(eq(scenes.id, siblings[i].id))
+        .run();
+    }
+
+    const script = await tx
+      .select()
+      .from(scripts)
+      .where(eq(scripts.id, opts.scriptId))
+      .get();
+
+    await tx
+      .insert(scenes)
+      .values({
+        id: newId,
+        projectId: opts.projectId,
+        scriptId: opts.scriptId,
+        heading: opts.heading,
+        orderIndex: insertAt,
+        sceneNumber: opts.sceneNumber,
+        rawText: SLUG_ONLY_RAW_TEXT,
+        sourceType: (script?.sourceType as SceneSourceType) ?? "typed",
+        parsedMeta: null,
+        createdAt: now,
+      })
+      .run();
+  });
+
+  return mapScene(
+    (await db.select().from(scenes).where(eq(scenes.id, newId)).get())!
+  );
+}
+
+/** Delete one scene plus its canvas / chat / cheat sheet prep, then reindex. */
+export async function deleteSceneById(sceneId: string): Promise<boolean> {
+  const scene = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.id, sceneId))
+    .get();
+  if (!scene) return false;
+
+  await db.transaction(async (tx) => {
+    await deleteSceneScopedData(tx, sceneId);
+    await tx.delete(scenes).where(eq(scenes.id, sceneId)).run();
+
+    const remaining = (
+      await tx
+        .select()
+        .from(scenes)
+        .where(
+          and(
+            eq(scenes.projectId, scene.projectId),
+            eq(scenes.scriptId, scene.scriptId)
+          )
+        )
+        .all()
+    ).sort((a, b) => a.orderIndex - b.orderIndex);
+
+    for (let i = 0; i < remaining.length; i++) {
+      const row = remaining[i];
+      if (row.orderIndex !== i) {
+        await tx
+          .update(scenes)
+          .set({ orderIndex: i })
+          .where(eq(scenes.id, row.id))
+          .run();
+      }
+    }
+  });
+
+  return true;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function reassignSceneScopedData(tx: Tx, oldId: string, newId: string) {
+  await tx
+    .update(canvasNodes)
     .set({ sceneId: newId })
     .where(eq(canvasNodes.sceneId, oldId))
     .run();
-  db.update(chatMessages)
+  await tx
+    .update(chatMessages)
     .set({ sceneId: newId })
     .where(eq(chatMessages.sceneId, oldId))
     .run();
-  db.update(cheatSheets)
+  await tx
+    .update(cheatSheets)
     .set({ sceneId: newId })
     .where(eq(cheatSheets.sceneId, oldId))
     .run();
 }
 
-function deleteSceneScopedData(sceneId: string) {
-  db.delete(canvasNodes).where(eq(canvasNodes.sceneId, sceneId)).run();
-  db.delete(chatMessages).where(eq(chatMessages.sceneId, sceneId)).run();
-  db.delete(cheatSheets).where(eq(cheatSheets.sceneId, sceneId)).run();
+async function deleteSceneScopedData(tx: Tx, sceneId: string) {
+  await tx.delete(canvasNodes).where(eq(canvasNodes.sceneId, sceneId)).run();
+  await tx.delete(chatMessages).where(eq(chatMessages.sceneId, sceneId)).run();
+  await tx.delete(cheatSheets).where(eq(cheatSheets.sceneId, sceneId)).run();
 }
 
-export function previewScriptReplaceFromSlugs(opts: {
+export async function previewScriptReplaceFromSlugs(opts: {
   projectId: string;
   scriptId: string;
   slugs: SceneSlugPayload[];
-}): { diff: SceneDiffEntry[]; newSceneCount: number } {
-  const oldScenes = db
-    .select()
-    .from(scenes)
-    .where(
-      and(
-        eq(scenes.projectId, opts.projectId),
-        eq(scenes.scriptId, opts.scriptId)
+}): Promise<{ diff: SceneDiffEntry[]; newSceneCount: number }> {
+  const oldScenes = (
+    await db
+      .select()
+      .from(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
       )
-    )
-    .all()
-    .map(mapScene);
+      .all()
+  ).map(mapScene);
 
   const parts = slugsToSplitScenes(opts.slugs);
   return {
@@ -266,31 +389,32 @@ export function previewScriptReplaceFromSlugs(opts: {
   };
 }
 
-export function replaceScriptScenesWithRemapFromSlugs(opts: {
+export async function replaceScriptScenesWithRemapFromSlugs(opts: {
   projectId: string;
   scriptId: string;
   slugs: SceneSlugPayload[];
   sourceType: SceneSourceType;
   transfers: RemapTransferMap;
-}): { sceneCount: number; transferred: number } {
+}): Promise<{ sceneCount: number; transferred: number }> {
   const now = nowIso();
   const parts = slugsToSplitScenes(opts.slugs);
-  const oldScenes = db
-    .select()
-    .from(scenes)
-    .where(
-      and(
-        eq(scenes.projectId, opts.projectId),
-        eq(scenes.scriptId, opts.scriptId)
+  const oldScenes = (
+    await db
+      .select()
+      .from(scenes)
+      .where(
+        and(
+          eq(scenes.projectId, opts.projectId),
+          eq(scenes.scriptId, opts.scriptId)
+        )
       )
-    )
-    .all()
-    .map(mapScene);
+      .all()
+  ).map(mapScene);
 
   const diff = diffScriptScenes(oldScenes, parts);
   let transferred = 0;
 
-  sqlite.transaction(() => {
+  await db.transaction(async (tx) => {
     const oldIds = oldScenes.map((s) => s.id);
     const remappedOldIds = new Set<string>();
 
@@ -303,7 +427,8 @@ export function replaceScriptScenesWithRemapFromSlugs(opts: {
         (entry.status === "unchanged" || entry.status === "changed") &&
         (opts.transfers[old!.id] ?? entry.transferDefault);
 
-      db.insert(scenes)
+      await tx
+        .insert(scenes)
         .values({
           id: newId,
           projectId: opts.projectId,
@@ -313,6 +438,7 @@ export function replaceScriptScenesWithRemapFromSlugs(opts: {
           sceneNumber: entry.newScene.sceneNumber,
           shootDay: shouldTransfer ? (old?.shootDay ?? null) : null,
           shootOrder: shouldTransfer ? (old?.shootOrder ?? null) : null,
+          prepped: shouldTransfer && old?.prepped ? 1 : 0,
           rawText: SLUG_ONLY_RAW_TEXT,
           sourceType: opts.sourceType,
           parsedMeta: null,
@@ -321,7 +447,7 @@ export function replaceScriptScenesWithRemapFromSlugs(opts: {
         .run();
 
       if (shouldTransfer && old) {
-        reassignSceneScopedData(old.id, newId);
+        await reassignSceneScopedData(tx, old.id, newId);
         remappedOldIds.add(old.id);
         transferred += 1;
       }
@@ -329,35 +455,45 @@ export function replaceScriptScenesWithRemapFromSlugs(opts: {
 
     for (const id of oldIds) {
       if (!remappedOldIds.has(id)) {
-        deleteSceneScopedData(id);
+        await deleteSceneScopedData(tx, id);
       }
     }
 
     if (oldIds.length > 0) {
-      db.delete(scenes).where(inArray(scenes.id, oldIds)).run();
+      await tx.delete(scenes).where(inArray(scenes.id, oldIds)).run();
     }
 
-    db.update(scripts)
+    await tx
+      .update(scripts)
       .set({ sourceType: opts.sourceType })
       .where(eq(scripts.id, opts.scriptId))
       .run();
-  })();
+  });
 
   return { sceneCount: parts.length, transferred };
 }
 
-export function deleteScriptAndScenes(scriptId: string) {
-  const sceneRows = db
+export async function deleteScriptAndScenes(scriptId: string): Promise<void> {
+  const sceneRows = await db
     .select()
     .from(scenes)
     .where(eq(scenes.scriptId, scriptId))
     .all();
   const sceneIds = sceneRows.map((s) => s.id);
   if (sceneIds.length > 0) {
-    db.delete(cheatSheets).where(inArray(cheatSheets.sceneId, sceneIds)).run();
-    db.delete(canvasNodes).where(inArray(canvasNodes.sceneId, sceneIds)).run();
-    db.delete(chatMessages).where(inArray(chatMessages.sceneId, sceneIds)).run();
+    await db
+      .delete(cheatSheets)
+      .where(inArray(cheatSheets.sceneId, sceneIds))
+      .run();
+    await db
+      .delete(canvasNodes)
+      .where(inArray(canvasNodes.sceneId, sceneIds))
+      .run();
+    await db
+      .delete(chatMessages)
+      .where(inArray(chatMessages.sceneId, sceneIds))
+      .run();
   }
-  db.delete(scenes).where(eq(scenes.scriptId, scriptId)).run();
-  db.delete(scripts).where(eq(scripts.id, scriptId)).run();
+  await db.delete(scenes).where(eq(scenes.scriptId, scriptId)).run();
+  await db.delete(scripts).where(eq(scripts.id, scriptId)).run();
 }

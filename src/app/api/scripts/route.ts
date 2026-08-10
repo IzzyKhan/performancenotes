@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  return NextResponse.json(listScriptsForProject(projectId));
+  return NextResponse.json(await listScriptsForProject(projectId));
 }
 
 /**
@@ -70,11 +70,11 @@ export async function POST(request: Request) {
     const access = await requireProjectAccess(projectId);
     if ("error" in access) return access.error;
 
-    const allowed = checkScriptCreateAllowed(access.user.id, projectId);
+    const allowed = await checkScriptCreateAllowed(access.user.id, projectId);
     if (!allowed.ok) return allowed.error;
 
     const saveStarted = Date.now();
-    const result = createScriptWithSceneSlugs({
+    const result = await createScriptWithSceneSlugs({
       projectId,
       title: title || "Episode",
       slugs,

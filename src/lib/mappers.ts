@@ -7,6 +7,7 @@ import type {
   CheatSheet,
   CheatSheetContent,
   ParsedMeta,
+  Project,
   Scene,
   Script,
 } from "@/types";
@@ -15,6 +16,7 @@ import { normalizeShotListContent } from "@/lib/shot-list";
 import { normalizeImageGridContent } from "@/lib/image-grid";
 import { normalizePerformanceNotesContent } from "@/lib/performance-notes";
 import { normalizeSceneSynopsisContent } from "@/lib/scene-synopsis";
+import { DEFAULT_COLOR_THEME_ID, isColorThemeId } from "@/lib/color-themes";
 
 export function mapScript(row: {
   id: string;
@@ -45,6 +47,37 @@ export function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
+export function mapProject(row: {
+  id: string;
+  userId?: string | null;
+  title: string;
+  createdAt: string;
+  prepStartDate?: string | null;
+  shootStartDate?: string | null;
+  techRecceDate?: string | null;
+  prepEndBeforeTechRecce?: number | boolean | null;
+  prepDaysPerWeek?: number | null;
+  colorTheme?: string | null;
+}): Project {
+  const days = row.prepDaysPerWeek;
+  return {
+    id: row.id,
+    userId: row.userId ?? null,
+    title: row.title,
+    createdAt: row.createdAt,
+    prepStartDate: row.prepStartDate ?? null,
+    shootStartDate: row.shootStartDate ?? null,
+    techRecceDate: row.techRecceDate ?? null,
+    prepEndBeforeTechRecce: Boolean(row.prepEndBeforeTechRecce),
+    prepDaysPerWeek:
+      typeof days === "number" && days >= 1 && days <= 7 ? days : 5,
+    colorTheme:
+      row.colorTheme && isColorThemeId(row.colorTheme)
+        ? row.colorTheme
+        : DEFAULT_COLOR_THEME_ID,
+  };
+}
+
 export function mapScene(row: {
   id: string;
   projectId: string;
@@ -54,6 +87,7 @@ export function mapScene(row: {
   sceneNumber?: string | null;
   shootDay?: number | null;
   shootOrder?: number | null;
+  prepped?: number | boolean | null;
   rawText: string;
   sourceType: string;
   parsedMeta: string | null;
@@ -68,6 +102,7 @@ export function mapScene(row: {
     sceneNumber: row.sceneNumber ?? null,
     shootDay: row.shootDay ?? null,
     shootOrder: row.shootOrder ?? null,
+    prepped: Boolean(row.prepped),
     rawText: row.rawText,
     sourceType: row.sourceType as Scene["sourceType"],
     parsedMeta: parseJson<ParsedMeta | null>(row.parsedMeta, null),

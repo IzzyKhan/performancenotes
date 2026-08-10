@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, X } from "lucide-react";
+import { Download, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,17 +13,24 @@ import {
 /**
  * Full-height modal that embeds a PDF blob URL. The browser's built-in
  * PDF viewer scrolls through multi-page documents inside the iframe.
+ * Supports a loading / error panel while the export is being built.
  */
 export function PdfPreviewDialog({
   open,
   url,
   filename,
+  loading = false,
+  error = null,
+  downloading = false,
   onOpenChange,
   onDownload,
 }: {
   open: boolean;
   url: string | null;
   filename?: string | null;
+  loading?: boolean;
+  error?: string | null;
+  downloading?: boolean;
   onOpenChange: (open: boolean) => void;
   onDownload?: () => void;
 }) {
@@ -38,20 +45,29 @@ export function PdfPreviewDialog({
           <div className="min-w-0 space-y-1">
             <DialogTitle>Export preview</DialogTitle>
             <DialogDescription className="truncate">
-              {filename ?? "PDF"} — scroll to review pages
+              {loading
+                ? "Building PDF…"
+                : error
+                  ? "Could not build preview"
+                  : `${filename ?? "PDF"} — scroll to review pages`}
             </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {onDownload ? (
+            {onDownload && !loading && !error ? (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="gap-1.5"
+                className="gap-1.5 text-[var(--project-accent)]"
+                disabled={downloading}
                 onClick={onDownload}
               >
-                <Download className="size-3.5" />
-                Download
+                {downloading ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Download className="size-3.5" />
+                )}
+                {downloading ? "Exporting…" : "Download"}
               </Button>
             ) : null}
             <Button
@@ -66,14 +82,32 @@ export function PdfPreviewDialog({
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 bg-muted/40">
-          {url ? (
+        <div className="relative min-h-0 flex-1 bg-muted/40">
+          {loading ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+              <Loader2 className="size-8 animate-spin text-[var(--project-accent)]" />
+              <p className="text-sm text-muted-foreground">
+                Building your scene pack…
+              </p>
+            </div>
+          ) : error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-sm font-medium text-foreground">
+                Nothing to preview
+              </p>
+              <p className="max-w-sm text-sm text-muted-foreground">{error}</p>
+            </div>
+          ) : url ? (
             <iframe
               title={filename ?? "PDF preview"}
               src={`${url}#view=FitH`}
               className="h-full w-full border-0"
             />
-          ) : null}
+          ) : (
+            <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+              No preview available.
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { canvasNodes, canvasTemplates, scenes } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import {
@@ -40,6 +40,7 @@ function mapTemplate(row: {
 
 /** GET /api/canvas-templates?projectId=… */
 export async function GET(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   if (!projectId) {
@@ -49,11 +50,13 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const rows = db
-    .select()
-    .from(canvasTemplates)
-    .where(eq(canvasTemplates.projectId, projectId))
-    .all()
+  const rows = (
+    await db
+      .select()
+      .from(canvasTemplates)
+      .where(eq(canvasTemplates.projectId, projectId))
+      .all()
+  )
     .map(mapTemplate)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
@@ -65,6 +68,7 @@ export async function GET(request: Request) {
  * Body: { projectId, sceneId, name? } — save current scene layout as empty shells.
  */
 export async function POST(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { projectId, sceneId, name } = body as {
     projectId?: string;
@@ -82,16 +86,18 @@ export async function POST(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const scene = db.select().from(scenes).where(eq(scenes.id, sceneId)).get();
+  const scene = await db.select().from(scenes).where(eq(scenes.id, sceneId)).get();
   if (!scene || scene.projectId !== projectId) {
     return NextResponse.json({ error: "Scene not found" }, { status: 404 });
   }
 
-  const sceneNodes = db
-    .select()
-    .from(canvasNodes)
-    .where(eq(canvasNodes.projectId, projectId))
-    .all()
+  const sceneNodes = (
+    await db
+      .select()
+      .from(canvasNodes)
+      .where(eq(canvasNodes.projectId, projectId))
+      .all()
+  )
     .map(mapCanvasNode)
     .filter((n) => n.sceneId === sceneId);
 
@@ -109,7 +115,8 @@ export async function POST(request: Request) {
       ? name.trim()
       : `Layout from ${scene.heading || "scene"}`;
 
-  db.insert(canvasTemplates)
+  await db
+    .insert(canvasTemplates)
     .values({
       id,
       projectId,
@@ -120,11 +127,11 @@ export async function POST(request: Request) {
     })
     .run();
 
-  const created = db
+  const created = (await db
     .select()
     .from(canvasTemplates)
     .where(eq(canvasTemplates.id, id))
-    .get()!;
+    .get())!;
 
   return NextResponse.json(mapTemplate(created), { status: 201 });
 }

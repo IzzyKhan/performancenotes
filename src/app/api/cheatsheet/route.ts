@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { cheatSheets } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import { createId, nowIso } from "@/lib/id";
@@ -16,6 +16,7 @@ function sheetScope(projectId: string, sceneId: string | null) {
 }
 
 export async function GET(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   const sceneId = searchParams.get("sceneId");
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const row = db
+  const row = await db
     .select()
     .from(cheatSheets)
     .where(sheetScope(projectId, sceneId))
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { projectId, sceneId = null, content } = body as {
     projectId: string;
@@ -55,14 +57,15 @@ export async function PUT(request: Request) {
 
   const normalized = normalizeCheatSheetContent(content);
 
-  const existing = db
+  const existing = await db
     .select()
     .from(cheatSheets)
     .where(sheetScope(projectId, sceneId))
     .get();
 
   if (existing) {
-    db.update(cheatSheets)
+    await db
+      .update(cheatSheets)
       .set({
         content: JSON.stringify(normalized),
         version: existing.version + 1,
@@ -71,7 +74,8 @@ export async function PUT(request: Request) {
       .where(eq(cheatSheets.id, existing.id))
       .run();
   } else {
-    db.insert(cheatSheets)
+    await db
+      .insert(cheatSheets)
       .values({
         id: createId("sheet"),
         projectId,
@@ -83,10 +87,10 @@ export async function PUT(request: Request) {
       .run();
   }
 
-  const saved = db
+  const saved = (await db
     .select()
     .from(cheatSheets)
     .where(sheetScope(projectId, sceneId))
-    .get()!;
+    .get())!;
   return NextResponse.json(mapCheatSheet(saved));
 }

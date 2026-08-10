@@ -129,7 +129,7 @@ export function EditProjectDialog({
             type="button"
             size="sm"
             variant="ghost"
-            className="gap-1.5 text-xs text-muted-foreground"
+            className="gap-1.5 text-xs text-[var(--project-accent)]"
           />
         }
       >
@@ -229,6 +229,7 @@ export function EditProjectDialog({
           </Button>
           <Button
             type="button"
+            variant="accent"
             onClick={() => void save()}
             disabled={loading || saving}
           >

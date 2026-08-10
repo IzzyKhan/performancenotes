@@ -176,7 +176,7 @@ export function CanvasTemplatesMenu({
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            "inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-normal text-foreground hover:bg-muted"
+            "inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-normal text-[var(--project-accent)] hover:bg-muted"
           )}
         >
           <LayoutTemplate className="size-3.5" />
@@ -285,7 +285,7 @@ export function CanvasTemplatesMenu({
             <label className="flex items-start gap-2">
               <input
                 type="checkbox"
-                className="mt-0.5 size-3.5 accent-primary"
+                className="mt-0.5 size-3.5 accent-[var(--project-accent)]"
                 checked={overwrite}
                 onChange={(e) => setOverwrite(e.target.checked)}
               />
@@ -307,6 +307,7 @@ export function CanvasTemplatesMenu({
               </Button>
               <Button
                 type="button"
+                variant="accent"
                 size="sm"
                 disabled={selectedScenes.size === 0 || applying}
                 onClick={() => void runApply()}

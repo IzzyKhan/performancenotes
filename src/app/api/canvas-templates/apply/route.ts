@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { db, sqlite } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { db, ensureDb } from "@/db";
 import { canvasNodes, canvasTemplates, scenes } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import {
@@ -20,6 +20,7 @@ export const runtime = "nodejs";
  * have nodes unless overwrite is true (then deletes existing scene nodes first).
  */
 export async function POST(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { projectId, templateId, sceneIds, overwrite } = body as {
     projectId?: string;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const templateRow = db
+  const templateRow = await db
     .select()
     .from(canvasTemplates)
     .where(eq(canvasTemplates.id, templateId))
@@ -61,19 +62,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const projectScenes = db
+  const projectScenes = await db
     .select()
     .from(scenes)
     .where(eq(scenes.projectId, projectId))
     .all();
   const sceneById = new Map(projectScenes.map((s) => [s.id, s]));
 
-  const allNodes = db
-    .select()
-    .from(canvasNodes)
-    .where(eq(canvasNodes.projectId, projectId))
-    .all()
-    .map(mapCanvasNode);
+  const allNodes = (
+    await db
+      .select()
+      .from(canvasNodes)
+      .where(eq(canvasNodes.projectId, projectId))
+      .all()
+  ).map(mapCanvasNode);
 
   const nodesByScene = new Map<string, number>();
   for (const n of allNodes) {
@@ -85,15 +87,7 @@ export async function POST(request: Request) {
   const skipped: string[] = [];
   const missing: string[] = [];
 
-  const insert = sqlite.prepare(
-    `INSERT INTO canvas_nodes (id, project_id, scene_id, type, content, position_x, position_y, label, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const deleteSceneNodes = sqlite.prepare(
-    `DELETE FROM canvas_nodes WHERE project_id = ? AND scene_id = ?`
-  );
-
-  const tx = sqlite.transaction(() => {
+  await db.transaction(async (tx) => {
     for (const sceneId of sceneIds) {
       if (!sceneById.has(sceneId)) {
         missing.push(sceneId);
@@ -105,26 +99,36 @@ export async function POST(request: Request) {
         continue;
       }
       if (existingCount > 0 && overwrite) {
-        deleteSceneNodes.run(projectId, sceneId);
+        await tx
+          .delete(canvasNodes)
+          .where(
+            and(
+              eq(canvasNodes.projectId, projectId),
+              eq(canvasNodes.sceneId, sceneId)
+            )
+          )
+          .run();
       }
       const created = nowIso();
       for (const node of newTemplateNodeIds(templateNodes)) {
-        insert.run(
-          node.id,
-          projectId,
-          sceneId,
-          node.type,
-          JSON.stringify(node.content ?? {}),
-          node.positionX,
-          node.positionY,
-          node.label,
-          created
-        );
+        await tx
+          .insert(canvasNodes)
+          .values({
+            id: node.id,
+            projectId,
+            sceneId,
+            type: node.type,
+            content: JSON.stringify(node.content ?? {}),
+            positionX: node.positionX,
+            positionY: node.positionY,
+            label: node.label,
+            createdAt: created,
+          })
+          .run();
       }
       applied.push(sceneId);
     }
   });
-  tx();
 
   return NextResponse.json({
     applied,

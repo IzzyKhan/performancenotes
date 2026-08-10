@@ -59,6 +59,7 @@ import {
   formatShotCode,
   normalizeShotListContent,
 } from "@/lib/shot-list";
+import { useDeleteConfirm } from "@/components/canvas/use-delete-confirm";
 
 export type ShotListFlowData = {
   canvasNode: CanvasNode;
@@ -220,6 +221,7 @@ export const ShotListNode = memo(function ShotListNode({
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const pendingRowId = useRef<string | null>(null);
+  const { requestDelete, deleteDialog } = useDeleteConfirm();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -258,6 +260,21 @@ export const ShotListNode = memo(function ShotListNode({
     commit({
       ...content,
       rows: rows.length > 0 ? rows : [emptyShotListRow(1)],
+    });
+  }
+
+  function confirmDeleteRow(row: ShotListRow) {
+    const code = formatShotCode(row.setup, row.camera);
+    const named = code ? `Shot ${code}` : "This shot";
+    const detail = row.description.trim() ? ` — “${row.description.trim()}”` : "";
+    const isLast = content.rows.length <= 1;
+    requestDelete({
+      title: isLast ? "Clear this shot?" : "Delete this shot?",
+      description: isLast
+        ? `${named}${detail} is the only shot, so the row will be cleared. This cannot be undone.`
+        : `${named}${detail} will be removed from the shot list. This cannot be undone.`,
+      confirmLabel: isLast ? "Clear" : "Delete",
+      onConfirm: () => deleteRow(row.id),
     });
   }
 
@@ -576,7 +593,7 @@ export const ShotListNode = memo(function ShotListNode({
                     row={row}
                     columns={content.columns}
                     renderCell={renderCell}
-                    onDelete={() => deleteRow(row.id)}
+                    onDelete={() => confirmDeleteRow(row)}
                   />
                 ))}
               </SortableContext>
@@ -612,6 +629,8 @@ export const ShotListNode = memo(function ShotListNode({
           if (file && rowId) void uploadRowImage(rowId, file);
         }}
       />
+
+      {deleteDialog}
     </div>
   );
 });

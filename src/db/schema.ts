@@ -7,7 +7,7 @@ export const users = sqliteTable("users", {
   createdAt: text("created_at").notNull(),
   /** Stripe customer id when billing is enabled (Phase 4). */
   stripeCustomerId: text("stripe_customer_id"),
-  /** free | organize | dramaturg | null (free). Legacy "prep" → organize in Stage 2. */
+  /** free | solo | pro | dramaturg | null (free). Legacy organize/prep → pro on DB open. */
   plan: text("plan"),
   /** Monthly Claude request count (quota). */
   chatUsageCount: integer("chat_usage_count").notNull().default(0),
@@ -19,6 +19,20 @@ export const projects = sqliteTable("projects", {
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   createdAt: text("created_at").notNull(),
+  /** ISO date (YYYY-MM-DD) when prep begins. */
+  prepStartDate: text("prep_start_date"),
+  /** ISO date (YYYY-MM-DD) when principal photography begins. */
+  shootStartDate: text("shoot_start_date"),
+  /** ISO date (YYYY-MM-DD) when the tech recce takes place. */
+  techRecceDate: text("tech_recce_date"),
+  /** When 1, prep must finish the day before tech recce instead of shoot start. */
+  prepEndBeforeTechRecce: integer("prep_end_before_tech_recce")
+    .notNull()
+    .default(0),
+  /** How many days per week the user will prep (1–7). */
+  prepDaysPerWeek: integer("prep_days_per_week").notNull().default(5),
+  /** Accent colour id (see src/lib/color-themes.ts) — "neutral" is the unstyled default. */
+  colorTheme: text("color_theme").notNull().default("neutral"),
 });
 
 export const scripts = sqliteTable("scripts", {
@@ -47,6 +61,8 @@ export const scenes = sqliteTable("scenes", {
   sceneNumber: text("scene_number"),
   shootDay: integer("shoot_day"),
   shootOrder: integer("shoot_order"),
+  /** 1 when the user has marked this scene as prepped. */
+  prepped: integer("prepped").notNull().default(0),
   /** Slug-only on launch tiers — dialogue/action not persisted (empty string). */
   rawText: text("raw_text").notNull(),
   sourceType: text("source_type").notNull(), // pdf | typed

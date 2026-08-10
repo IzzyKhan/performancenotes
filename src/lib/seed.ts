@@ -75,13 +75,14 @@ Try me.
 
 let seeded = false;
 
-function insertDemoProject(userId: string | null) {
+async function insertDemoProject(userId: string | null) {
   const now = nowIso();
   const projectId = createId("proj");
   const scriptId = createId("script");
   const sceneId = createId("scene");
 
-  db.insert(projects)
+  await db
+    .insert(projects)
     .values({
       id: projectId,
       userId,
@@ -90,7 +91,8 @@ function insertDemoProject(userId: string | null) {
     })
     .run();
 
-  db.insert(scripts)
+  await db
+    .insert(scripts)
     .values({
       id: scriptId,
       projectId,
@@ -103,7 +105,8 @@ function insertDemoProject(userId: string | null) {
     .run();
 
   const parsedMeta = parseScreenplayText(DEMO_SCENE);
-  db.insert(scenes)
+  await db
+    .insert(scenes)
     .values({
       id: sceneId,
       projectId,
@@ -170,10 +173,11 @@ function insertDemoProject(userId: string | null) {
   ];
 
   for (const n of nodes) {
-    db.insert(canvasNodes).values(n).run();
+    await db.insert(canvasNodes).values(n).run();
   }
 
-  db.insert(chatMessages)
+  await db
+    .insert(chatMessages)
     .values({
       id: createId("msg"),
       projectId,
@@ -186,17 +190,17 @@ function insertDemoProject(userId: string | null) {
 }
 
 /** Legacy: seed one global demo when DB is empty and auth is off. */
-export function seedDemoIfEmpty() {
+export async function seedDemoIfEmpty() {
   if (seeded) return;
   seeded = true;
 
-  const existing = db.select().from(projects).all();
+  const existing = await db.select().from(projects).all();
   if (existing.length > 0) return;
 
-  insertDemoProject(null);
+  await insertDemoProject(null);
 }
 
 /** Phase 2: seed a personal demo project for a new user. */
-export function seedDemoForUser(userId: string) {
-  insertDemoProject(userId);
+export async function seedDemoForUser(userId: string) {
+  await insertDemoProject(userId);
 }

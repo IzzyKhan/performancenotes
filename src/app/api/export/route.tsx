@@ -11,7 +11,7 @@ import {
 import { NextResponse } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
 import path from "path";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { cheatSheets, scenes, canvasNodes } from "@/db/schema";
 import { formatActionLine } from "@/lib/action-verbs";
 import { requireProjectAccess } from "@/lib/auth-guard";
@@ -40,6 +40,7 @@ import {
   EXPORT_TYPE_LABELS,
   parseExportTypeOrder,
 } from "@/lib/export-types";
+import { getPdfAccentColor } from "@/lib/color-themes";
 import type {
   CanvasNode,
   CanvasNodeType,
@@ -86,22 +87,17 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexGrow: 1,
     flexShrink: 1,
+    flexBasis: 0,
     paddingRight: 12,
   },
   headerRight: {
     flexShrink: 0,
-    maxWidth: "42%",
+    width: 120,
     alignItems: "flex-end",
   },
   sceneSlug: {
     fontSize: 12,
     fontFamily: "Helvetica-Bold",
-    marginBottom: 2,
-  },
-  sceneSlugRight: {
-    fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    textAlign: "right",
     marginBottom: 2,
   },
   projectTitle: {
@@ -282,7 +278,142 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: "#666",
   },
+  /** Portrait "article" layout for prose (synopsis, text notes) — no table. */
+  articlePage: {
+    paddingTop: 56,
+    paddingBottom: 56,
+    paddingHorizontal: 64,
+    fontFamily: "Helvetica",
+    fontSize: 10.5,
+    color: "#111",
+    lineHeight: 1.6,
+  },
+  articleEyebrow: {
+    fontSize: 8,
+    letterSpacing: 1.6,
+    textTransform: "uppercase",
+    color: "#888",
+    marginBottom: 8,
+  },
+  articleHeading: {
+    fontSize: 21,
+    fontFamily: "Helvetica-Bold",
+    lineHeight: 1.15,
+    marginBottom: 4,
+  },
+  articleDivider: {
+    borderBottomWidth: 1.5,
+    borderBottomColor: "#111",
+    marginBottom: 26,
+  },
+  articleParagraph: {
+    fontSize: 10.5,
+    lineHeight: 1.65,
+    marginBottom: 13,
+    textAlign: "justify",
+  },
+  articleCard: {
+    marginBottom: 18,
+  },
+  articleCardLabel: {
+    fontSize: 8,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    color: "#888",
+    marginBottom: 6,
+    fontFamily: "Helvetica-Bold",
+  },
+  articleCardRule: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#ddd",
+    marginBottom: 18,
+  },
+  articleFooter: {
+    position: "absolute",
+    bottom: 28,
+    left: 64,
+    right: 64,
+    fontSize: 7,
+    color: "#999",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderTopWidth: 0.5,
+    borderTopColor: "#ddd",
+    paddingTop: 8,
+  },
+  beatBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 3,
+  },
+  beatBadge: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#111",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 5,
+  },
+  beatBadgeText: {
+    fontSize: 7,
+    fontFamily: "Helvetica-Bold",
+    color: "#fff",
+  },
+  /** Landscape header, right column: schedule number over "Day N · #M". */
+  scheduleNumber: {
+    fontSize: 13,
+    fontFamily: "Helvetica-Bold",
+    textAlign: "right",
+  },
+  scheduleCaption: {
+    fontSize: 8,
+    color: "#666",
+    textAlign: "right",
+    marginTop: 1,
+  },
+  /** Portrait article header: slug (left) vs. schedule info (right), side by side. */
+  articleHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  articleHeaderLeft: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    paddingRight: 16,
+  },
+  articleHeaderRight: {
+    flexShrink: 0,
+    width: 100,
+    alignItems: "flex-end",
+    paddingTop: 3,
+  },
+  articleScheduleNumber: {
+    fontSize: 16,
+    fontFamily: "Helvetica-Bold",
+    textAlign: "right",
+  },
+  articleScheduleCaption: {
+    fontSize: 9,
+    color: "#666",
+    textAlign: "right",
+    marginTop: 1,
+  },
 });
+
+/** "Day 2 · #3" -> "2.03" — a compact, sortable ID for physically ordering pages. */
+function scheduleNumberFromShootLabel(
+  shootLabel?: string | null
+): string | null {
+  if (!shootLabel) return null;
+  const match = shootLabel.match(/^Day\s+(\d+)\s*·\s*#(\d+)$/);
+  if (!match) return null;
+  const [, day, order] = match;
+  return `${day}.${order.padStart(2, "0")}`;
+}
 
 /** Node payload ready for PDF rendering (images already base64 data URIs). */
 export interface ExportCanvasNode {
@@ -318,6 +449,54 @@ interface SheetSection {
   content: CheatSheetContent;
   version: number;
   canvasNodes: ExportCanvasNode[];
+}
+
+function sectionHasSheetContent(section: SheetSection): boolean {
+  const rows = buildTableRows(section.content);
+  return rows.length > 0 || Boolean(section.content.notes?.trim());
+}
+
+function canvasNodeIsExportable(node: ExportCanvasNode): boolean {
+  switch (node.type) {
+    case "text":
+      return Boolean(node.text?.trim() || node.label?.trim());
+    case "image":
+      return true;
+    case "mood":
+      return Boolean(node.mood?.trim() || node.label?.trim());
+    case "video-link":
+      return Boolean(node.url?.trim() || node.label?.trim());
+    case "audio":
+      return Boolean(node.fileName?.trim() || node.label?.trim());
+    case "scene-synopsis":
+      return Boolean(node.sceneSynopsis?.trim());
+    case "shot-list":
+      return (
+        (node.shotListColumns?.length ?? 0) > 0 &&
+        (node.shotListRows?.length ?? 0) > 0
+      );
+    case "image-grid":
+      return (node.imageGridItems?.length ?? 0) > 0;
+    case "performance-notes":
+      return (node.performanceNotesBeats ?? []).some(
+        (b) => b.characters.length > 0
+      );
+    default:
+      return false;
+  }
+}
+
+function filterExportableCanvasNodes(
+  nodes: ExportCanvasNode[]
+): ExportCanvasNode[] {
+  return nodes.filter(canvasNodeIsExportable);
+}
+
+function sectionHasExportContent(section: SheetSection): boolean {
+  return (
+    sectionHasSheetContent(section) ||
+    filterExportableCanvasNodes(section.canvasNodes).length > 0
+  );
 }
 
 type TableRow = {
@@ -409,26 +588,42 @@ function SectionHeader({
   shootLabel,
   sceneSlug,
   sectionLabel,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   sectionLabel: string;
+  accentColor?: string | null;
 }) {
   const slug = sceneSlug ?? sceneHeading ?? "Scene";
-  const left = shootLabel ?? slug;
-  const right = shootLabel ? slug : null;
+  const scheduleNumber = scheduleNumberFromShootLabel(shootLabel);
+  const accent = accentColor;
 
   return (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        {/* <Text style={styles.sectionEyebrow}>{sectionLabel}</Text> */}
-        <Text style={styles.sceneSlug}>{left}</Text>
+        <Text style={styles.sectionEyebrow}>{sectionLabel}</Text>
+        <Text style={[styles.sceneSlug, accent ? { color: accent } : {}]}>
+          {slug}
+        </Text>
       </View>
       <View style={styles.headerRight}>
-        {right ? (
-          <Text style={styles.sceneSlugRight}>{right}</Text>
+        {shootLabel ? (
+          <>
+            {scheduleNumber ? (
+              <Text
+                style={[
+                  styles.scheduleNumber,
+                  accent ? { color: accent } : {},
+                ]}
+              >
+                {scheduleNumber}
+              </Text>
+            ) : null}
+            <Text style={styles.scheduleCaption}>{shootLabel}</Text>
+          </>
         ) : null}
         {/* <Text style={styles.projectTitle}>{title}</Text> */}
       </View>
@@ -436,109 +631,326 @@ function SectionHeader({
   );
 }
 
+/** Conservative row budget so wrap={false} cheat-sheet rows never overflow a page. */
+const CHEAT_SHEET_ROWS_PER_PAGE = 8;
+
+function chunkTableRows<T>(rows: T[], size: number): T[][] {
+  if (rows.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) {
+    chunks.push(rows.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function SheetPage({
   title,
   section,
+  accentColor = null,
 }: {
   title: string;
   section: SheetSection;
+  accentColor?: string | null;
 }) {
   const { sceneHeading, shootLabel, sceneSlug, content } = section;
   const rows = buildTableRows(content);
-  const hasSheet = rows.length > 0 || Boolean(content.notes);
-  const isPackOnly = !hasSheet && section.canvasNodes.length > 0;
+  const hasNotes = Boolean(content.notes?.trim());
+  if (rows.length === 0 && !hasNotes) return null;
+
+  // Notes only on the first page; shrink that page's row budget so notes
+  // don't push wrap={false} rows into a blank overflow page.
+  let rowChunks: TableRow[][];
+  if (rows.length === 0) {
+    rowChunks = [[]];
+  } else if (hasNotes) {
+    const firstBudget = Math.max(3, CHEAT_SHEET_ROWS_PER_PAGE - 3);
+    const rest = chunkTableRows(
+      rows.slice(firstBudget),
+      CHEAT_SHEET_ROWS_PER_PAGE
+    );
+    rowChunks = [rows.slice(0, firstBudget), ...rest];
+  } else {
+    rowChunks = chunkTableRows(rows, CHEAT_SHEET_ROWS_PER_PAGE);
+  }
+  const multi = rowChunks.length > 1;
 
   return (
-    <Page size="A4" orientation="landscape" style={styles.page}>
-      <SectionHeader
-        title={title}
-        sceneHeading={sceneHeading}
-        shootLabel={shootLabel}
-        sceneSlug={sceneSlug}
-        sectionLabel={isPackOnly ? "Reference pack" : "Cheat sheet"}
-      />
+    <>
+      {rowChunks.map((chunk, pageIndex) => (
+        <Page
+          key={`sheet-p${pageIndex}`}
+          size="A4"
+          orientation="landscape"
+          style={styles.page}
+        >
+          <SectionHeader
+            title={title}
+            sceneHeading={sceneHeading}
+            shootLabel={shootLabel}
+            sceneSlug={sceneSlug}
+            sectionLabel={
+              multi
+                ? `Cheat sheet (${pageIndex + 1}/${rowChunks.length})`
+                : "Cheat sheet"
+            }
+            accentColor={accentColor}
+          />
 
-      {isPackOnly ? (
-        <View style={styles.notes}>
-          <Text style={styles.notesLabel}>Instinct references</Text>
-          <Text style={styles.notesText}>
-            Canvas materials for this scene follow on the next pages.
+          {pageIndex === 0 && hasNotes ? (
+            <View style={styles.notes}>
+              <Text style={styles.notesLabel}>Director notes</Text>
+              <Text style={styles.notesText}>{content.notes}</Text>
+            </View>
+          ) : null}
+
+          {chunk.length > 0 ? (
+            <View style={styles.table}>
+              <View style={styles.headerRow} fixed>
+                <HeaderCell width={COL.beat}>Beat</HeaderCell>
+                <HeaderCell width={COL.character}>Character</HeaderCell>
+                <HeaderCell width={COL.objective}>Possible objectives</HeaderCell>
+                <HeaderCell width={COL.actions}>Possible actions</HeaderCell>
+                <HeaderCell width={COL.obstacles}>Obstacles</HeaderCell>
+                <HeaderCell width={COL.pitfalls}>Pitfalls</HeaderCell>
+                <HeaderCell width={COL.adjustments}>Adjustments</HeaderCell>
+              </View>
+
+              {chunk.map((row, i) => (
+                <View
+                  key={`${pageIndex}-${i}`}
+                  style={[
+                    styles.row,
+                    row.isFirstInBeat ? styles.beatDivider : {},
+                  ]}
+                  wrap={false}
+                >
+                  <BodyCell width={COL.beat}>
+                    {row.showBeat ? (
+                      <>
+                        <Text style={styles.beatNum}>{row.beatIndex}</Text>
+                        <Text style={styles.beatName}>{row.beatName}</Text>
+                      </>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.character}>
+                    {row.showCharacter ? (
+                      <Text style={styles.characterName}>
+                        {row.characterName}
+                      </Text>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.objective}>
+                    {row.objective ? (
+                      <Text style={styles.cellText}>{row.objective}</Text>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.actions}>
+                    {row.action ? (
+                      <Text style={styles.cellText}>{row.action}</Text>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.obstacles}>
+                    {row.obstacle ? (
+                      <Text style={styles.cellText}>{row.obstacle}</Text>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.pitfalls}>
+                    {row.pitfalls ? (
+                      <Text style={styles.cellText}>{row.pitfalls}</Text>
+                    ) : null}
+                  </BodyCell>
+                  <BodyCell width={COL.adjustments}>
+                    {row.adjustments ? (
+                      <Text style={styles.cellText}>{row.adjustments}</Text>
+                    ) : null}
+                  </BodyCell>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <PageFooter />
+        </Page>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Header for portrait "article" pages (synopsis, text notes) — bigger, editorial.
+ * Slug always takes the left column so it has room to breathe; schedule info
+ * (when shooting in shoot order) sits in its own column on the right instead
+ * of competing with the slug for the same line.
+ */
+function ArticleHeader({
+  eyebrow,
+  slug,
+  shootLabel,
+  accentColor = null,
+}: {
+  eyebrow: string;
+  slug: string;
+  shootLabel?: string | null;
+  accentColor?: string | null;
+}) {
+  const scheduleNumber = scheduleNumberFromShootLabel(shootLabel);
+  const accent = accentColor;
+
+  return (
+    <View>
+      <View style={styles.articleHeaderRow}>
+        <View style={styles.articleHeaderLeft}>
+          <Text style={styles.articleEyebrow}>{eyebrow}</Text>
+          <Text
+            style={[styles.articleHeading, accent ? { color: accent } : {}]}
+          >
+            {slug}
           </Text>
         </View>
-      ) : null}
-
-      {content.notes ? (
-        <View style={styles.notes}>
-          <Text style={styles.notesLabel}>Director notes</Text>
-          <Text style={styles.notesText}>{content.notes}</Text>
-        </View>
-      ) : null}
-
-      {rows.length > 0 ? (
-      <View style={styles.table}>
-        <View style={styles.headerRow} fixed>
-          <HeaderCell width={COL.beat}>Beat</HeaderCell>
-          <HeaderCell width={COL.character}>Character</HeaderCell>
-          <HeaderCell width={COL.objective}>Possible objectives</HeaderCell>
-          <HeaderCell width={COL.actions}>Possible actions</HeaderCell>
-          <HeaderCell width={COL.obstacles}>Obstacles</HeaderCell>
-          <HeaderCell width={COL.pitfalls}>Pitfalls</HeaderCell>
-          <HeaderCell width={COL.adjustments}>Adjustments</HeaderCell>
-        </View>
-
-        {rows.map((row, i) => (
-          <View
-            key={i}
-            style={[styles.row, row.isFirstInBeat ? styles.beatDivider : {}]}
-            wrap={false}
-          >
-            <BodyCell width={COL.beat}>
-              {row.showBeat ? (
-                <>
-                  <Text style={styles.beatNum}>{row.beatIndex}</Text>
-                  <Text style={styles.beatName}>{row.beatName}</Text>
-                </>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.character}>
-              {row.showCharacter ? (
-                <Text style={styles.characterName}>{row.characterName}</Text>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.objective}>
-              {row.objective ? (
-                <Text style={styles.cellText}>{row.objective}</Text>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.actions}>
-              {row.action ? (
-                <Text style={styles.cellText}>{row.action}</Text>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.obstacles}>
-              {row.obstacle ? (
-                <Text style={styles.cellText}>{row.obstacle}</Text>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.pitfalls}>
-              {row.pitfalls ? (
-                <Text style={styles.cellText}>{row.pitfalls}</Text>
-              ) : null}
-            </BodyCell>
-            <BodyCell width={COL.adjustments}>
-              {row.adjustments ? (
-                <Text style={styles.cellText}>{row.adjustments}</Text>
-              ) : null}
-            </BodyCell>
+        {shootLabel ? (
+          <View style={styles.articleHeaderRight}>
+            {scheduleNumber ? (
+              <Text
+                style={[
+                  styles.articleScheduleNumber,
+                  accent ? { color: accent } : {},
+                ]}
+              >
+                {scheduleNumber}
+              </Text>
+            ) : null}
+            <Text style={styles.articleScheduleCaption}>{shootLabel}</Text>
           </View>
-        ))}
+        ) : null}
       </View>
-      ) : null}
+      <View style={styles.articleDivider} />
+    </View>
+  );
+}
 
-      <PageFooter />
+function ArticleFooter({ label }: { label: string }) {
+  return (
+    <View style={styles.articleFooter} fixed>
+      <Text>{label}</Text>
+      <Text
+        render={({ pageNumber, totalPages }) =>
+          `${pageNumber} / ${totalPages}`
+        }
+      />
+    </View>
+  );
+}
+
+/**
+ * Prose split into paragraphs on blank lines so it reads like a document, not a cell.
+ * Stray single newlines *within* a paragraph (e.g. text typed/pasted with hard-wrapped
+ * lines) are collapsed to spaces — react-pdf renders literal "\n" as a forced line
+ * break, which otherwise truncates lines at the source's wrap width instead of the
+ * page's, leaving a ragged, half-empty right margin.
+ */
+function textToParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s*\n\s*/g, " ").trim())
+    .filter(Boolean);
+}
+
+function SceneSynopsisPage({
+  sceneHeading,
+  shootLabel,
+  sceneSlug,
+  nodes,
+  accentColor = null,
+}: {
+  title: string;
+  sceneHeading: string | null;
+  shootLabel?: string | null;
+  sceneSlug?: string | null;
+  nodes: ExportCanvasNode[];
+  accentColor?: string | null;
+}) {
+  const slug = sceneSlug ?? sceneHeading ?? "Scene";
+
+  return (
+    <Page size="A4" orientation="portrait" style={styles.articlePage}>
+      <ArticleHeader
+        eyebrow="Scene synopsis"
+        slug={slug}
+        shootLabel={shootLabel}
+        accentColor={accentColor}
+      />
+      {nodes.map((n, i) => {
+        const paragraphs = textToParagraphs(n.sceneSynopsis || "");
+        return (
+          <View key={n.id} style={i > 0 ? styles.articleCard : undefined}>
+            {i > 0 ? <View style={styles.articleCardRule} /> : null}
+            {n.label ? (
+              <Text style={styles.articleCardLabel}>{n.label}</Text>
+            ) : null}
+            {paragraphs.length > 0 ? (
+              paragraphs.map((p, pi) => (
+                <Text key={pi} style={styles.articleParagraph}>
+                  {p}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.emptyNote}>No synopsis yet.</Text>
+            )}
+          </View>
+        );
+      })}
+      <ArticleFooter label="Synopsis" />
     </Page>
   );
 }
+
+function TextNotesPage({
+  sceneHeading,
+  shootLabel,
+  sceneSlug,
+  nodes,
+  accentColor = null,
+}: {
+  title: string;
+  sceneHeading: string | null;
+  shootLabel?: string | null;
+  sceneSlug?: string | null;
+  nodes: ExportCanvasNode[];
+  accentColor?: string | null;
+}) {
+  const slug = sceneSlug ?? sceneHeading ?? "Scene";
+
+  return (
+    <Page size="A4" orientation="portrait" style={styles.articlePage}>
+      <ArticleHeader
+        eyebrow="Text notes"
+        slug={slug}
+        shootLabel={shootLabel}
+        accentColor={accentColor}
+      />
+      {nodes.map((n, i) => (
+        <View key={n.id} style={styles.articleCard}>
+          {i > 0 ? <View style={styles.articleCardRule} /> : null}
+          <Text style={styles.articleCardLabel}>
+            {n.label || "Untitled note"}
+          </Text>
+          {textToParagraphs(n.text || "").length > 0 ? (
+            textToParagraphs(n.text || "").map((p, pi) => (
+              <Text key={pi} style={styles.articleParagraph}>
+                {p}
+              </Text>
+            ))
+          ) : (
+            <Text style={styles.emptyNote}>No note text.</Text>
+          )}
+        </View>
+      ))}
+      <ArticleFooter label="Text notes" />
+    </Page>
+  );
+}
+
+const REF_TABLE_ROWS_PER_PAGE = 18;
 
 function RefTablePage({
   title,
@@ -548,6 +960,7 @@ function RefTablePage({
   typeLabel,
   headers,
   rows,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
@@ -556,39 +969,60 @@ function RefTablePage({
   typeLabel: string;
   headers: { width: string; label: string }[];
   rows: string[][];
+  accentColor?: string | null;
 }) {
+  const chunks = chunkTableRows(rows, REF_TABLE_ROWS_PER_PAGE);
+  if (chunks.length === 0) return null;
+  const multi = chunks.length > 1;
+
   return (
-    <Page size="A4" orientation="landscape" style={styles.page}>
-      <SectionHeader
-        title={title}
-        sceneHeading={sceneHeading}
-        shootLabel={shootLabel}
-        sceneSlug={sceneSlug}
-        sectionLabel={`Canvas references · ${typeLabel}`}
-      />
-      <Text style={styles.sectionTitle}>{typeLabel}</Text>
-      <View style={styles.table}>
-        <View style={styles.headerRow} fixed>
-          {headers.map((h) => (
-            <HeaderCell key={h.label} width={h.width}>
-              {h.label}
-            </HeaderCell>
-          ))}
-        </View>
-        {rows.map((cells, i) => (
-          <View key={i} style={styles.row} wrap={false}>
-            {cells.map((cell, ci) => (
-              <BodyCell key={ci} width={headers[ci].width}>
-                <Text style={styles.cellText}>{cell || "—"}</Text>
-              </BodyCell>
+    <>
+      {chunks.map((chunk, pageIndex) => (
+        <Page
+          key={`ref-${typeLabel}-p${pageIndex}`}
+          size="A4"
+          orientation="landscape"
+          style={styles.page}
+        >
+          <SectionHeader
+            title={title}
+            sceneHeading={sceneHeading}
+            shootLabel={shootLabel}
+            sceneSlug={sceneSlug}
+            sectionLabel={`Canvas references · ${typeLabel}`}
+            accentColor={accentColor}
+          />
+          <Text style={styles.sectionTitle}>
+            {multi
+              ? `${typeLabel} (${pageIndex + 1}/${chunks.length})`
+              : typeLabel}
+          </Text>
+          <View style={styles.table}>
+            <View style={styles.headerRow} fixed>
+              {headers.map((h) => (
+                <HeaderCell key={h.label} width={h.width}>
+                  {h.label}
+                </HeaderCell>
+              ))}
+            </View>
+            {chunk.map((cells, i) => (
+              <View key={i} style={styles.row} wrap={false}>
+                {cells.map((cell, ci) => (
+                  <BodyCell key={ci} width={headers[ci].width}>
+                    <Text style={styles.cellText}>{cell || "—"}</Text>
+                  </BodyCell>
+                ))}
+              </View>
             ))}
           </View>
-        ))}
-      </View>
-      <PageFooter />
-    </Page>
+          <PageFooter />
+        </Page>
+      ))}
+    </>
   );
 }
+
+const IMAGE_APPENDIX_PER_PAGE = 6;
 
 function ImageAppendixPage({
   title,
@@ -596,48 +1030,68 @@ function ImageAppendixPage({
   shootLabel,
   sceneSlug,
   nodes,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   nodes: ExportCanvasNode[];
+  accentColor?: string | null;
 }) {
+  const pages = chunkGridItems(nodes, IMAGE_APPENDIX_PER_PAGE);
+  if (pages.length === 0) return null;
+  const multi = pages.length > 1;
+
   return (
-    <Page size="A4" orientation="landscape" style={styles.page}>
-      <SectionHeader
-        title={title}
-        sceneHeading={sceneHeading}
-        shootLabel={shootLabel}
-        sceneSlug={sceneSlug}
-        sectionLabel="Canvas references · Images"
-      />
-      <Text style={styles.sectionTitle}>Images</Text>
-      <View style={styles.imageGrid}>
-        {nodes.map((n) => (
-          <View key={n.id} style={styles.imageCard} wrap={false}>
-            {n.imageSrc ? (
-              // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image
-              <Image src={n.imageSrc} style={styles.imageThumb} />
-            ) : (
-              <View style={styles.imageThumb}>
-                <Text style={styles.emptyNote}>Image unavailable</Text>
+    <>
+      {pages.map((chunk, pageIndex) => (
+        <Page
+          key={`images-p${pageIndex}`}
+          size="A4"
+          orientation="landscape"
+          style={styles.page}
+        >
+          <SectionHeader
+            title={title}
+            sceneHeading={sceneHeading}
+            shootLabel={shootLabel}
+            sceneSlug={sceneSlug}
+            sectionLabel="Canvas references · Images"
+            accentColor={accentColor}
+          />
+          <Text style={styles.sectionTitle}>
+            {multi ? `Images (${pageIndex + 1}/${pages.length})` : "Images"}
+          </Text>
+          <View style={styles.imageGrid}>
+            {chunk.map((n) => (
+              <View key={n.id} style={styles.imageCard} wrap={false}>
+                {n.imageSrc ? (
+                  // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image
+                  <Image src={n.imageSrc} style={styles.imageThumb} />
+                ) : (
+                  <View style={styles.imageThumb}>
+                    <Text style={styles.emptyNote}>Image unavailable</Text>
+                  </View>
+                )}
+                <Text style={styles.imageLabel}>
+                  {n.label || "Untitled reference"}
+                </Text>
+                {n.fileName ? (
+                  <Text style={styles.imageCaption}>{n.fileName}</Text>
+                ) : null}
               </View>
-            )}
-            <Text style={styles.imageLabel}>{n.label || "Untitled reference"}</Text>
-            {n.fileName ? (
-              <Text style={styles.imageCaption}>{n.fileName}</Text>
-            ) : null}
+            ))}
           </View>
-        ))}
-      </View>
-      <PageFooter />
-    </Page>
+          <PageFooter />
+        </Page>
+      ))}
+    </>
   );
 }
 
 function chunkGridItems<T>(items: T[], pageSize: number): T[][] {
-  if (items.length === 0) return [[]];
+  if (items.length === 0) return [];
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += pageSize) {
     chunks.push(items.slice(i, i + pageSize));
@@ -657,17 +1111,20 @@ function ImageGridAppendixPages({
   shootLabel,
   sceneSlug,
   node,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   node: ExportCanvasNode;
+  accentColor?: string | null;
 }) {
   const cols = node.imageGridColumns ?? 3;
   const items = node.imageGridItems ?? [];
   const perPage = cols * 3;
   const pages = chunkGridItems(items, perPage);
+  if (pages.length === 0) return null;
   const cardWidth = imageGridCardWidth(cols);
   const boardTitle = node.imageGridTitle || node.label || "Mood board";
 
@@ -686,6 +1143,7 @@ function ImageGridAppendixPages({
             shootLabel={shootLabel}
             sceneSlug={sceneSlug}
             sectionLabel="Canvas references · Image grid"
+            accentColor={accentColor}
           />
           <Text style={styles.sectionTitle}>
             {boardTitle}
@@ -729,52 +1187,75 @@ function MoodAppendixPage({
   shootLabel,
   sceneSlug,
   nodes,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   nodes: ExportCanvasNode[];
+  accentColor?: string | null;
 }) {
+  const chunks = chunkTableRows(nodes, REF_TABLE_ROWS_PER_PAGE);
+  if (chunks.length === 0) return null;
+  const multi = chunks.length > 1;
+
   return (
-    <Page size="A4" orientation="landscape" style={styles.page}>
-      <SectionHeader
-        title={title}
-        sceneHeading={sceneHeading}
-        shootLabel={shootLabel}
-        sceneSlug={sceneSlug}
-        sectionLabel="Canvas references · Mood tags"
-      />
-      <Text style={styles.sectionTitle}>Mood tags</Text>
-      <View style={styles.table}>
-        <View style={styles.headerRow} fixed>
-          <HeaderCell width="25%">Annotation</HeaderCell>
-          <HeaderCell width="60%">Mood</HeaderCell>
-          <HeaderCell width="15%">Color</HeaderCell>
-        </View>
-        {nodes.map((n) => (
-          <View key={n.id} style={styles.row} wrap={false}>
-            <BodyCell width="25%">
-              <Text style={styles.cellText}>{n.label || "—"}</Text>
-            </BodyCell>
-            <BodyCell width="60%">
-              <Text style={styles.cellText}>{n.mood || "—"}</Text>
-            </BodyCell>
-            <BodyCell width="15%">
-              <View style={styles.moodRow}>
-                {n.color ? (
-                  <View
-                    style={[styles.colorSwatch, { backgroundColor: n.color }]}
-                  />
-                ) : null}
-                <Text style={styles.cellText}>{n.color || "—"}</Text>
+    <>
+      {chunks.map((chunk, pageIndex) => (
+        <Page
+          key={`mood-p${pageIndex}`}
+          size="A4"
+          orientation="landscape"
+          style={styles.page}
+        >
+          <SectionHeader
+            title={title}
+            sceneHeading={sceneHeading}
+            shootLabel={shootLabel}
+            sceneSlug={sceneSlug}
+            sectionLabel="Canvas references · Mood tags"
+            accentColor={accentColor}
+          />
+          <Text style={styles.sectionTitle}>
+            {multi
+              ? `Mood tags (${pageIndex + 1}/${chunks.length})`
+              : "Mood tags"}
+          </Text>
+          <View style={styles.table}>
+            <View style={styles.headerRow} fixed>
+              <HeaderCell width="25%">Annotation</HeaderCell>
+              <HeaderCell width="60%">Mood</HeaderCell>
+              <HeaderCell width="15%">Color</HeaderCell>
+            </View>
+            {chunk.map((n) => (
+              <View key={n.id} style={styles.row} wrap={false}>
+                <BodyCell width="25%">
+                  <Text style={styles.cellText}>{n.label || "—"}</Text>
+                </BodyCell>
+                <BodyCell width="60%">
+                  <Text style={styles.cellText}>{n.mood || "—"}</Text>
+                </BodyCell>
+                <BodyCell width="15%">
+                  <View style={styles.moodRow}>
+                    {n.color ? (
+                      <View
+                        style={[
+                          styles.colorSwatch,
+                          { backgroundColor: n.color },
+                        ]}
+                      />
+                    ) : null}
+                    <Text style={styles.cellText}>{n.color || "—"}</Text>
+                  </View>
+                </BodyCell>
               </View>
-            </BodyCell>
+            ))}
           </View>
-        ))}
-      </View>
-      <PageFooter />
-    </Page>
+          <PageFooter />
+        </Page>
+      ))}
+    </>
   );
 }
 
@@ -782,14 +1263,17 @@ function AppendixPages({
   title,
   section,
   typeOrder = TYPE_ORDER,
+  accentColor = null,
 }: {
   title: string;
   section: SheetSection;
   typeOrder?: CanvasNodeType[];
+  accentColor?: string | null;
 }) {
+  const exportableNodes = filterExportableCanvasNodes(section.canvasNodes);
   const byType = new Map<CanvasNodeType, ExportCanvasNode[]>();
   for (const type of TYPE_ORDER) byType.set(type, []);
-  for (const node of section.canvasNodes) {
+  for (const node of exportableNodes) {
     byType.get(node.type)?.push(node);
   }
 
@@ -811,6 +1295,7 @@ function AppendixPages({
           title={title}
           {...headingProps}
           nodes={nodes}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -818,13 +1303,13 @@ function AppendixPages({
 
     if (type === "image-grid") {
       for (const node of nodes) {
-        if (!(node.imageGridItems && node.imageGridItems.length > 0)) continue;
         pages.push(
           <ImageGridAppendixPages
             key={`${section.sceneHeading}-grid-${node.id}`}
             title={title}
             {...headingProps}
             node={node}
+            accentColor={accentColor}
           />
         );
       }
@@ -838,6 +1323,7 @@ function AppendixPages({
           title={title}
           {...headingProps}
           nodes={nodes}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -845,16 +1331,12 @@ function AppendixPages({
 
     if (type === "text") {
       pages.push(
-        <RefTablePage
+        <TextNotesPage
           key={`${section.sceneHeading}-text`}
           title={title}
           {...headingProps}
-          typeLabel={TYPE_LABELS.text}
-          headers={[
-            { width: "30%", label: "Annotation" },
-            { width: "70%", label: "Note" },
-          ]}
-          rows={nodes.map((n) => [n.label || "—", n.text || "—"])}
+          nodes={nodes}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -862,13 +1344,12 @@ function AppendixPages({
 
     if (type === "scene-synopsis") {
       pages.push(
-        <RefTablePage
+        <SceneSynopsisPage
           key={`${section.sceneHeading}-synopsis`}
           title={title}
           {...headingProps}
-          typeLabel={TYPE_LABELS["scene-synopsis"]}
-          headers={[{ width: "100%", label: "Synopsis" }]}
-          rows={nodes.map((n) => [n.sceneSynopsis || "—"])}
+          nodes={nodes}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -882,6 +1363,7 @@ function AppendixPages({
             title={title}
             {...headingProps}
             node={node}
+            accentColor={accentColor}
           />
         );
       }
@@ -900,6 +1382,7 @@ function AppendixPages({
             { width: "70%", label: "URL" },
           ]}
           rows={nodes.map((n) => [n.label || "—", n.url || "—"])}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -922,6 +1405,7 @@ function AppendixPages({
             n.fileName || "—",
             n.mimeType || "audio",
           ])}
+          accentColor={accentColor}
         />
       );
       continue;
@@ -935,12 +1419,14 @@ function AppendixPages({
             title={title}
             {...headingProps}
             node={node}
+            accentColor={accentColor}
           />
         );
       }
     }
   }
 
+  if (pages.length === 0) return null;
   return <>{pages}</>;
 }
 
@@ -1024,7 +1510,31 @@ function shotListColumnWidths(
   return widths;
 }
 
-const SHOT_LIST_ROWS_WITH_IMAGES = 5;
+/**
+ * Rows per page must match what actually fits. If a chunk overflows, react-pdf
+ * reflows the surplus onto a page of its own — 12 image rows chunked at 5
+ * render as 4/1/4/1/2 rather than 4/4/4.
+ *
+ * Derived from landscape A4 minus the fixed furniture above the table body.
+ */
+const A4_LANDSCAPE_HEIGHT = 595.28;
+const SHOT_LIST_BODY_HEIGHT =
+  A4_LANDSCAPE_HEIGHT -
+  28 - // styles.page paddingTop
+  36 - // styles.page paddingBottom
+  30.2 - // SectionHeader: 12pt slug line + 2 margin + 12 header margin
+  24.85 - // styles.sectionTitle line + marginBottom
+  1 - // styles.table top border
+  21.125; // styles.headerRow padding + 7.5pt label line + bottom border
+
+/** styles.shotListThumb height + styles.shotListRow padding + bottom border. */
+const SHOT_LIST_ROW_HEIGHT_WITH_IMAGE = 83 + 12 + 0.5;
+
+const SHOT_LIST_ROWS_WITH_IMAGES = Math.max(
+  1,
+  Math.floor(SHOT_LIST_BODY_HEIGHT / SHOT_LIST_ROW_HEIGHT_WITH_IMAGE)
+);
+/** Text rows are short enough that wrapped descriptions, not height, set the cap. */
 const SHOT_LIST_ROWS_TEXT = 16;
 
 function chunkShotListRows<T>(
@@ -1034,7 +1544,7 @@ function chunkShotListRows<T>(
   const size = hasImageCol
     ? SHOT_LIST_ROWS_WITH_IMAGES
     : SHOT_LIST_ROWS_TEXT;
-  if (rows.length === 0) return [[]];
+  if (rows.length === 0) return [];
   const chunks: T[][] = [];
   for (let i = 0; i < rows.length; i += size) {
     chunks.push(rows.slice(i, i + size));
@@ -1042,6 +1552,7 @@ function chunkShotListRows<T>(
   return chunks;
 }
 
+/** Character-rows per page — pack until full; only spill when necessary. */
 const PERFORMANCE_NOTES_ROWS_PER_PAGE = 14;
 
 const PERF_COL = {
@@ -1054,7 +1565,7 @@ function chunkPerformanceNotesBeats(
   beats: PerformanceNotesBeat[],
   maxRowsPerPage = PERFORMANCE_NOTES_ROWS_PER_PAGE
 ): PerformanceNotesBeat[][] {
-  if (beats.length === 0) return [[]];
+  if (beats.length === 0) return [];
   const chunks: PerformanceNotesBeat[][] = [];
   let current: PerformanceNotesBeat[] = [];
   let rowCount = 0;
@@ -1079,36 +1590,27 @@ function PerformanceNotesAppendixPages({
   shootLabel,
   sceneSlug,
   node,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   node: ExportCanvasNode;
+  accentColor?: string | null;
 }) {
   const listTitle =
     node.performanceNotesTitle || node.label || "Performance notes";
   const beats = node.performanceNotesBeats ?? [];
-  const chunks = chunkPerformanceNotesBeats(beats);
-  const multi = chunks.length > 1;
   const hasContent = beats.some((b) => b.characters.length > 0);
 
   if (!hasContent) {
-    return (
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <SectionHeader
-          title={title}
-          sceneHeading={sceneHeading}
-          shootLabel={shootLabel}
-          sceneSlug={sceneSlug}
-          sectionLabel="Canvas references · Performance notes"
-        />
-        <Text style={styles.sectionTitle}>{listTitle}</Text>
-        <Text style={styles.emptyNote}>No beats yet.</Text>
-        <PageFooter />
-      </Page>
-    );
+    return null;
   }
+
+  const chunks = chunkPerformanceNotesBeats(beats);
+  if (chunks.length === 0) return null;
+  const multi = chunks.length > 1;
 
   return (
     <>
@@ -1125,6 +1627,7 @@ function PerformanceNotesAppendixPages({
             shootLabel={shootLabel}
             sceneSlug={sceneSlug}
             sectionLabel="Canvas references · Performance notes"
+            accentColor={accentColor}
           />
           <Text style={styles.sectionTitle}>
             {multi
@@ -1141,6 +1644,13 @@ function PerformanceNotesAppendixPages({
             {chunk.map((beat) => (
               <View key={beat.id} style={styles.perfBeatGroup} wrap={false}>
                 <View style={styles.perfBeatCell}>
+                  <View style={styles.beatBadgeRow}>
+                    <View style={styles.beatBadge}>
+                      <Text style={styles.beatBadgeText}>
+                        {beats.indexOf(beat) + 1}
+                      </Text>
+                    </View>
+                  </View>
                   <Text style={styles.cellText}>{beat.beat || "—"}</Text>
                 </View>
                 <View style={styles.perfCharStack}>
@@ -1188,37 +1698,27 @@ function ShotListAppendixPages({
   shootLabel,
   sceneSlug,
   node,
+  accentColor = null,
 }: {
   title: string;
   sceneHeading: string | null;
   shootLabel?: string | null;
   sceneSlug?: string | null;
   node: ExportCanvasNode;
+  accentColor?: string | null;
 }) {
   const columns = node.shotListColumns ?? [];
   const rows = node.shotListRows ?? [];
   const listTitle = node.shotListTitle || node.label || "Shot list";
   const hasImageCol = columns.includes("image");
   const widths = shotListColumnWidths(columns);
-  const chunks = chunkShotListRows(rows, hasImageCol);
-  const multi = chunks.length > 1;
-
-  if (columns.length === 0) {
-    return (
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <SectionHeader
-          title={title}
-          sceneHeading={sceneHeading}
-          shootLabel={shootLabel}
-          sceneSlug={sceneSlug}
-          sectionLabel="Canvas references · Shot list"
-        />
-        <Text style={styles.sectionTitle}>{listTitle}</Text>
-        <Text style={styles.emptyNote}>No shots yet.</Text>
-        <PageFooter />
-      </Page>
-    );
+  if (columns.length === 0 || rows.length === 0) {
+    return null;
   }
+
+  const chunks = chunkShotListRows(rows, hasImageCol);
+  if (chunks.length === 0) return null;
+  const multi = chunks.length > 1;
 
   return (
     <>
@@ -1235,24 +1735,22 @@ function ShotListAppendixPages({
             shootLabel={shootLabel}
             sceneSlug={sceneSlug}
             sectionLabel="Canvas references · Shot list"
+            accentColor={accentColor}
           />
           <Text style={styles.sectionTitle}>
             {multi
               ? `${listTitle} (${pageIndex + 1}/${chunks.length})`
               : listTitle}
           </Text>
-          {chunk.length === 0 ? (
-            <Text style={styles.emptyNote}>No shots yet.</Text>
-          ) : (
-            <View style={styles.table}>
-              <View style={styles.headerRow} fixed>
-                {columns.map((col) => (
-                  <HeaderCell key={col} width={widths[col] ?? "12%"}>
-                    {SHOT_LIST_COLUMN_LABELS[col]}
-                  </HeaderCell>
-                ))}
-              </View>
-              {chunk.map((row) => (
+          <View style={styles.table}>
+            <View style={styles.headerRow} fixed>
+              {columns.map((col) => (
+                <HeaderCell key={col} width={widths[col] ?? "12%"}>
+                  {SHOT_LIST_COLUMN_LABELS[col]}
+                </HeaderCell>
+              ))}
+            </View>
+            {chunk.map((row) => (
                 <View key={row.id} style={styles.shotListRow} wrap={false}>
                   {columns.map((col) => (
                     <BodyCell key={col} width={widths[col] ?? "12%"}>
@@ -1274,7 +1772,6 @@ function ShotListAppendixPages({
                 </View>
               ))}
             </View>
-          )}
           <PageFooter />
         </Page>
       ))}
@@ -1286,25 +1783,43 @@ function CheatSheetDocument({
   title,
   sections,
   typeOrder = TYPE_ORDER,
+  accentColor = null,
 }: {
   title: string;
   sections: SheetSection[];
   typeOrder?: CanvasNodeType[];
+  accentColor?: string | null;
 }) {
   return (
     <Document>
-      {sections.map((section, i) => (
-        <React.Fragment key={i}>
-          <SheetPage title={title} section={section} />
-          {section.canvasNodes.length > 0 ? (
-            <AppendixPages
-              title={title}
-              section={section}
-              typeOrder={typeOrder}
-            />
-          ) : null}
-        </React.Fragment>
-      ))}
+      {sections.map((section, i) => {
+        const showSheet = sectionHasSheetContent(section);
+        const exportableCanvas = filterExportableCanvasNodes(
+          section.canvasNodes
+        );
+        const showAppendix = exportableCanvas.length > 0;
+        if (!showSheet && !showAppendix) return null;
+
+        return (
+          <React.Fragment key={i}>
+            {showSheet ? (
+              <SheetPage
+                title={title}
+                section={section}
+                accentColor={accentColor}
+              />
+            ) : null}
+            {showAppendix ? (
+              <AppendixPages
+                title={title}
+                section={{ ...section, canvasNodes: exportableCanvas }}
+                typeOrder={typeOrder}
+                accentColor={accentColor}
+              />
+            ) : null}
+          </React.Fragment>
+        );
+      })}
     </Document>
   );
 }
@@ -1324,16 +1839,18 @@ function parseIncludeCanvas(value: string | null): boolean {
 }
 
 /** Active-scene nodes only (no legacy null-sceneId project-wide nodes). */
-function loadSceneCanvasNodes(
+async function loadSceneCanvasNodes(
   projectId: string,
   sceneId: string | null
-): CanvasNode[] {
+): Promise<CanvasNode[]> {
   if (!sceneId) return [];
-  return db
-    .select()
-    .from(canvasNodes)
-    .where(eq(canvasNodes.projectId, projectId))
-    .all()
+  return (
+    await db
+      .select()
+      .from(canvasNodes)
+      .where(eq(canvasNodes.projectId, projectId))
+      .all()
+  )
     .map(mapCanvasNode)
     .filter((n) => n.sceneId === sceneId);
 }
@@ -1431,6 +1948,7 @@ function toExportNodes(nodes: CanvasNode[]): ExportCanvasNode[] {
 }
 
 export async function GET(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   const sceneId = searchParams.get("sceneId");
@@ -1453,6 +1971,7 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
   const { project } = access;
+  const accentColor = getPdfAccentColor(project.colorTheme);
 
   if (scope === "all" || (sceneIds && sceneIds.length > 0)) {
     return exportAll(
@@ -1464,25 +1983,26 @@ export async function GET(request: Request) {
       mode,
       sceneIds,
       disposition,
-      typeOrder
+      typeOrder,
+      accentColor
     );
   }
 
-  const projectScripts = listScriptsForProject(projectId);
+  const projectScripts = await listScriptsForProject(projectId);
   const multiScript = projectScripts.length > 1;
   const sceneRow = sceneId
-    ? db.select().from(scenes).where(eq(scenes.id, sceneId)).get()
-    : db.select().from(scenes).where(eq(scenes.projectId, projectId)).get();
+    ? await db.select().from(scenes).where(eq(scenes.id, sceneId)).get()
+    : await db.select().from(scenes).where(eq(scenes.projectId, projectId)).get();
   const scene = sceneRow ? mapScene(sceneRow) : null;
   const sceneScript = scene
     ? projectScripts.find((s) => s.id === scene.scriptId) ?? null
     : null;
   const activeSceneId = scene?.id ?? sceneId;
   const canvas = includeCanvas
-    ? toExportNodes(loadSceneCanvasNodes(projectId, activeSceneId))
+    ? toExportNodes(await loadSceneCanvasNodes(projectId, activeSceneId))
     : [];
 
-  const cheatRow = db
+  const cheatRow = await db
     .select()
     .from(cheatSheets)
     .where(
@@ -1502,16 +2022,6 @@ export async function GET(request: Request) {
     );
   }
 
-  if (mode === "pack" && !cheatRow && canvas.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "Nothing to export for this scene yet — add references on the canvas first.",
-      },
-      { status: 404 }
-    );
-  }
-
   const emptyContent: CheatSheetContent = { beats: [] };
   const cheatSheet = cheatRow ? mapCheatSheet(cheatRow) : null;
   const sceneSlug = scene
@@ -1523,20 +2033,33 @@ export async function GET(request: Request) {
     ? `${shootLabel} · ${sceneSlug}`
     : sceneSlug;
 
+  const section: SheetSection = {
+    sceneHeading: heading,
+    shootLabel,
+    sceneSlug,
+    content: cheatSheet?.content ?? emptyContent,
+    version: cheatSheet?.version ?? 1,
+    canvasNodes: canvas,
+  };
+
+  // Match multi-scene gate: stub-only canvas / empty sheets must 404, not
+  // render a zero-page PDF.
+  if (mode === "pack" && !sectionHasExportContent(section)) {
+    return NextResponse.json(
+      {
+        error:
+          "Nothing to export for this scene yet — add references on the canvas first.",
+      },
+      { status: 404 }
+    );
+  }
+
   const buffer = await renderToBuffer(
     <CheatSheetDocument
       title={project.title}
       typeOrder={typeOrder}
-      sections={[
-        {
-          sceneHeading: heading,
-          shootLabel,
-          sceneSlug,
-          content: cheatSheet?.content ?? emptyContent,
-          version: cheatSheet?.version ?? 1,
-          canvasNodes: canvas,
-        },
-      ]}
+      accentColor={accentColor}
+      sections={[section]}
     />
   );
 
@@ -1570,12 +2093,13 @@ async function exportAll(
   mode: "pack" | "sheet" = "sheet",
   sceneIds: string[] | null = null,
   disposition: "attachment" | "inline" = "attachment",
-  typeOrder: CanvasNodeType[] = TYPE_ORDER
+  typeOrder: CanvasNodeType[] = TYPE_ORDER,
+  accentColor: string | null = null
 ) {
-  const projectScripts = listScriptsForProject(projectId);
+  const projectScripts = await listScriptsForProject(projectId);
   const multiScript = projectScripts.length > 1;
   const scriptsById = new Map(projectScripts.map((s) => [s.id, s]));
-  const rawScenes = listScenesForProject(projectId);
+  const rawScenes = await listScenesForProject(projectId);
   const allowed = sceneIds ? new Set(sceneIds) : null;
 
   const ordered =
@@ -1586,12 +2110,13 @@ async function exportAll(
     ? ordered.filter((s) => allowed.has(s.id))
     : ordered;
 
-  const allSheets = db
-    .select()
-    .from(cheatSheets)
-    .where(eq(cheatSheets.projectId, projectId))
-    .all()
-    .map(mapCheatSheet);
+  const allSheets = (
+    await db
+      .select()
+      .from(cheatSheets)
+      .where(eq(cheatSheets.projectId, projectId))
+      .all()
+  ).map(mapCheatSheet);
 
   const headingPartsFor = (scene: Scene) => {
     const script = scriptsById.get(scene.scriptId) ?? null;
@@ -1629,7 +2154,7 @@ async function exportAll(
         content: legacy.content,
         version: legacy.version,
         canvasNodes: includeCanvas
-          ? toExportNodes(loadSceneCanvasNodes(projectId, first?.id ?? null))
+          ? toExportNodes(await loadSceneCanvasNodes(projectId, first?.id ?? null))
           : [],
       });
     }
@@ -1645,7 +2170,7 @@ async function exportAll(
         content: sheet.content,
         version: sheet.version,
         canvasNodes: includeCanvas
-          ? toExportNodes(loadSceneCanvasNodes(projectId, scene.id))
+          ? toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
           : [],
       });
     }
@@ -1654,7 +2179,7 @@ async function exportAll(
     for (const scene of allScenes) {
       const sheet = allSheets.find((cs) => cs.sceneId === scene.id);
       const canvas = includeCanvas
-        ? toExportNodes(loadSceneCanvasNodes(projectId, scene.id))
+        ? toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
         : [];
       if (!sheet && canvas.length === 0) continue;
       const parts = headingPartsFor(scene);
@@ -1670,7 +2195,12 @@ async function exportAll(
     }
   }
 
-  if (sections.length === 0) {
+  const exportSections = sections.filter(sectionHasExportContent);
+  const exportSectionMeta = sectionMeta.filter((_, i) =>
+    sectionHasExportContent(sections[i])
+  );
+
+  if (exportSections.length === 0) {
     return NextResponse.json(
       {
         error:
@@ -1688,8 +2218,9 @@ async function exportAll(
     const buffer = await renderToBuffer(
       <CheatSheetDocument
         title={title}
-        sections={sections}
+        sections={exportSections}
         typeOrder={typeOrder}
+        accentColor={accentColor}
       />
     );
     const filename = `${slugify(title)}-${fileStem}${
@@ -1705,11 +2236,16 @@ async function exportAll(
 
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
-  for (const [i, s] of sections.entries()) {
+  for (const [i, s] of exportSections.entries()) {
     const buffer = await renderToBuffer(
-      <CheatSheetDocument title={title} sections={[s]} typeOrder={typeOrder} />
+      <CheatSheetDocument
+        title={title}
+        sections={[s]}
+        typeOrder={typeOrder}
+        accentColor={accentColor}
+      />
     );
-    const meta = sectionMeta[i];
+    const meta = exportSectionMeta[i];
     const script = meta?.scene
       ? scriptsById.get(meta.scene.scriptId)
       : undefined;

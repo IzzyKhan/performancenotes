@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { projects } from "@/db/schema";
 
 export type SessionUser = { id: string; email: string };
@@ -14,6 +14,8 @@ export function authRequired(): boolean {
 export async function requireUser(): Promise<
   { user: SessionUser } | { error: NextResponse }
 > {
+  await ensureDb();
+
   if (!authRequired()) {
     return { user: { id: "local", email: "local@localhost" } };
   }
@@ -29,11 +31,16 @@ export async function requireUser(): Promise<
   return { user: { id, email } };
 }
 
-export function getOwnedProject(projectId: string, userId: string) {
+export async function getOwnedProject(projectId: string, userId: string) {
+  await ensureDb();
   if (!authRequired() || userId === "local") {
-    return db.select().from(projects).where(eq(projects.id, projectId)).get();
+    return await db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .get();
   }
-  return db
+  return await db
     .select()
     .from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
@@ -47,7 +54,7 @@ export async function requireProjectAccess(projectId: string): Promise<
   const authResult = await requireUser();
   if ("error" in authResult) return authResult;
 
-  const project = getOwnedProject(projectId, authResult.user.id);
+  const project = await getOwnedProject(projectId, authResult.user.id);
   if (!project) {
     return {
       error: NextResponse.json({ error: "Project not found" }, { status: 404 }),

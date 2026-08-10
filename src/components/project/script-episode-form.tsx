@@ -135,6 +135,11 @@ export function ScriptEpisodeForm({
           className="min-h-40 font-mono text-xs"
         />
       )}
+
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        We parse/store scene headings only — dialogue and action never leave
+        your device.
+      </p>
     </div>
   );
 }

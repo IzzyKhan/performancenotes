@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { scenes, scripts } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
-import { checkScriptCreateAllowed } from "@/lib/entitlement-guard";
+import {
+  checkSceneCreateAllowed,
+  checkScriptCreateAllowed,
+} from "@/lib/entitlement-guard";
 import { mapScene } from "@/lib/mappers";
 import { parseSlugIngestBody } from "@/lib/scene-slug";
 import {
   createScriptWithSceneSlugs,
+  deleteSceneById,
+  insertSceneAfter,
   listScenesForProject,
   replaceScriptSceneSlugs,
   replaceScriptScenesWithRemapFromSlugs,
@@ -22,6 +27,7 @@ const SLUG_ONLY_HINT =
   "Parse the PDF in your browser and send scene headings as JSON (scenes array). We do not accept script files or body text on the server.";
 
 export async function GET(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   if (!projectId) {
@@ -31,7 +37,7 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  return NextResponse.json(listScenesForProject(projectId));
+  return NextResponse.json(await listScenesForProject(projectId));
 }
 
 /**
@@ -47,6 +53,7 @@ export async function GET(request: Request) {
  * - otherwise — wipe-and-replace
  */
 export async function POST(request: Request) {
+  await ensureDb();
   const contentType = request.headers.get("content-type") || "";
 
   if (contentType.includes("multipart/form-data")) {
@@ -59,6 +66,9 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+
+  const single = parseSingleSceneBody(body);
+  if (single) return addSingleScene(single);
 
   const ingest = parseSlugIngestBody(body);
   if (!ingest) {
@@ -86,7 +96,7 @@ export async function POST(request: Request) {
   const saveStarted = Date.now();
 
   if (scriptId) {
-    const script = db
+    const script = await db
       .select()
       .from(scripts)
       .where(eq(scripts.id, scriptId))
@@ -96,7 +106,7 @@ export async function POST(request: Request) {
     }
 
     if (mode === "preview") {
-      const preview = previewScriptReplaceFromSlugs({
+      const preview = await previewScriptReplaceFromSlugs({
         projectId,
         scriptId,
         slugs,
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
     }
 
     if (transfers) {
-      const result = replaceScriptScenesWithRemapFromSlugs({
+      const result = await replaceScriptScenesWithRemapFromSlugs({
         projectId,
         scriptId,
         slugs,
@@ -128,7 +138,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const sceneCount = replaceScriptSceneSlugs({
+    const sceneCount = await replaceScriptSceneSlugs({
       projectId,
       scriptId,
       slugs,
@@ -140,10 +150,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ scriptId, sceneCount }, { status: 201 });
   }
 
-  const allowed = checkScriptCreateAllowed(access.user.id, projectId);
+  const allowed = await checkScriptCreateAllowed(access.user.id, projectId);
   if (!allowed.ok) return allowed.error;
 
-  const result = createScriptWithSceneSlugs({
+  const result = await createScriptWithSceneSlugs({
     projectId,
     title: title || "Episode 1",
     slugs,
@@ -155,13 +165,79 @@ export async function POST(request: Request) {
   return NextResponse.json(result, { status: 201 });
 }
 
-/** Edit a single scene heading (slug-only — body text is not stored). */
+/** Manual single-scene add: { projectId, scriptId, scene: { heading, sceneNumber?, afterSceneId? } } */
+type SingleSceneBody = {
+  projectId: string;
+  scriptId: string;
+  heading: string;
+  sceneNumber: string | null;
+  afterSceneId: string | null;
+};
+
+function parseSingleSceneBody(body: unknown): SingleSceneBody | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  const scene = b.scene;
+  if (!scene || typeof scene !== "object" || Array.isArray(scene)) return null;
+
+  const s = scene as Record<string, unknown>;
+  const projectId = typeof b.projectId === "string" ? b.projectId.trim() : "";
+  const scriptId = typeof b.scriptId === "string" ? b.scriptId.trim() : "";
+  const heading = typeof s.heading === "string" ? s.heading.trim() : "";
+  if (!projectId || !scriptId || !heading) return null;
+
+  return {
+    projectId,
+    scriptId,
+    heading,
+    sceneNumber:
+      typeof s.sceneNumber === "string" && s.sceneNumber.trim()
+        ? s.sceneNumber.trim()
+        : null,
+    afterSceneId:
+      typeof s.afterSceneId === "string" && s.afterSceneId.trim()
+        ? s.afterSceneId.trim()
+        : null,
+  };
+}
+
+async function addSingleScene(input: SingleSceneBody) {
+  const access = await requireProjectAccess(input.projectId);
+  if ("error" in access) return access.error;
+
+  const allowed = await checkSceneCreateAllowed(access.user.id, input.projectId);
+  if (!allowed.ok) return allowed.error;
+
+  const script = await db
+    .select()
+    .from(scripts)
+    .where(eq(scripts.id, input.scriptId))
+    .get();
+  if (!script || script.projectId !== input.projectId) {
+    return NextResponse.json({ error: "Script not found" }, { status: 404 });
+  }
+
+  const scene = await insertSceneAfter({
+    projectId: input.projectId,
+    scriptId: input.scriptId,
+    heading: input.heading,
+    sceneNumber: input.sceneNumber,
+    afterSceneId: input.afterSceneId,
+  });
+
+  return NextResponse.json(scene, { status: 201 });
+}
+
+/** Edit a single scene heading / number / prepped flag (slug-only — body text is not stored). */
 export async function PATCH(request: Request) {
+  await ensureDb();
   const body = await request.json();
-  const { id, rawText, heading } = body as {
+  const { id, rawText, heading, sceneNumber, prepped } = body as {
     id: string;
     rawText?: string;
     heading?: string;
+    sceneNumber?: string | null;
+    prepped?: boolean;
   };
 
   if (!id) {
@@ -175,7 +251,7 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const existing = db.select().from(scenes).where(eq(scenes.id, id)).get();
+  const existing = await db.select().from(scenes).where(eq(scenes.id, id)).get();
   if (!existing) {
     return NextResponse.json({ error: "Scene not found" }, { status: 404 });
   }
@@ -183,13 +259,49 @@ export async function PATCH(request: Request) {
   const access = await requireProjectAccess(existing.projectId);
   if ("error" in access) return access.error;
 
+  const patch: {
+    heading?: string;
+    sceneNumber?: string | null;
+    prepped?: number;
+  } = {};
   if (typeof heading === "string" && heading.trim()) {
-    db.update(scenes)
-      .set({ heading: heading.trim() })
-      .where(eq(scenes.id, id))
-      .run();
+    patch.heading = heading.trim();
+  }
+  if (sceneNumber !== undefined) {
+    patch.sceneNumber =
+      typeof sceneNumber === "string" && sceneNumber.trim()
+        ? sceneNumber.trim()
+        : null;
+  }
+  if (typeof prepped === "boolean") {
+    patch.prepped = prepped ? 1 : 0;
   }
 
-  const updated = db.select().from(scenes).where(eq(scenes.id, id)).get()!;
+  if (Object.keys(patch).length > 0) {
+    await db.update(scenes).set(patch).where(eq(scenes.id, id)).run();
+  }
+
+  const updated = (await db.select().from(scenes).where(eq(scenes.id, id)).get())!;
   return NextResponse.json(mapScene(updated));
+}
+
+/** Delete one scene and its canvas / chat / cheat sheet prep. */
+export async function DELETE(request: Request) {
+  await ensureDb();
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  const existing = await db.select().from(scenes).where(eq(scenes.id, id)).get();
+  if (!existing) {
+    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+  }
+
+  const access = await requireProjectAccess(existing.projectId);
+  if ("error" in access) return access.error;
+
+  await deleteSceneById(id);
+  return NextResponse.json({ ok: true });
 }

@@ -18,19 +18,35 @@ import { AgentChat, type AgentChatHandle } from "@/components/chat/agent-chat";
 import { CheatSheetPanel } from "@/components/cheatsheet/cheat-sheet-panel";
 import { ScenePanel } from "@/components/scene/scene-panel";
 import { ShootScheduleDialog } from "@/components/schedule/shoot-schedule-dialog";
+import { PrepPaceDialog } from "@/components/project/prep-pace-dialog";
 import { ExportMenu } from "@/components/project/export-menu";
+import { ColorThemeSelector } from "@/components/project/color-theme-selector";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { CheatSheet, ProjectBundle, Scene, Script } from "@/types";
+import type { CheatSheet, Project, ProjectBundle, Scene, Script } from "@/types";
 import { cn } from "@/lib/utils";
 import { isAgentEnabled } from "@/lib/features";
 import { sceneSlugLabel } from "@/lib/schedule";
+import { parseIsoDate } from "@/lib/prep-pace";
+import { getColorThemeHex } from "@/lib/color-themes";
 
-const LEFT_PANEL_MIN = 280;
+function formatStatusDate(iso: string | null | undefined): string | null {
+  const date = parseIsoDate(iso);
+  if (!date) return null;
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
+const LEFT_PANEL_MIN = 380;
 const RIGHT_PANEL_MIN = 320;
 const PANEL_MAX_RATIO = 0.5;
 const AGENT_ENABLED = isAgentEnabled();
 
 export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
+  const [project, setProject] = useState<Project>(bundle.project);
   const [scripts, setScripts] = useState<Script[]>(bundle.scripts);
   const [scenes, setScenes] = useState<Scene[]>(bundle.scenes);
   const [activeScriptId, setActiveScriptId] = useState<string | null>(
@@ -57,6 +73,28 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const agentChatRef = useRef<AgentChatHandle>(null);
   const [agentStreaming, setAgentStreaming] = useState(false);
+  const [prepPaceOpen, setPrepPaceOpen] = useState(false);
+  // Locale-formatted dates are set after mount so SSR HTML can't disagree with
+  // the browser's timezone/locale (Node defaults to en-US; clients may differ).
+  const [footerDates, setFooterDates] = useState<{
+    today: string;
+    prepStart: string | null;
+    techRecce: string | null;
+    shootStart: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    setFooterDates({
+      today: new Date().toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      }),
+      prepStart: formatStatusDate(project.prepStartDate),
+      techRecce: formatStatusDate(project.techRecceDate),
+      shootStart: formatStatusDate(project.shootStartDate),
+    });
+  }, [project.prepStartDate, project.techRecceDate, project.shootStartDate]);
 
   // Re-sync scripts/scenes (incl. shoot schedule) from the API on mount and
   // whenever the tab becomes visible again, so App Router / browser cache
@@ -71,8 +109,9 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
           { cache: "no-store" }
         );
         if (!res.ok) return;
-        const data = (await res.json()) as ProjectBundle;
-        if (cancelled) return;
+        const data = (await res.json().catch(() => null)) as ProjectBundle | null;
+        if (cancelled || !data) return;
+        if (data.project) setProject(data.project);
         if (Array.isArray(data.scripts)) setScripts(data.scripts);
         if (Array.isArray(data.scenes)) setScenes(data.scenes);
         if (Array.isArray(data.cheatSheets)) setCheatSheets(data.cheatSheets);
@@ -94,10 +133,40 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
   }, [bundle.project.id]);
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? null;
+  const preppedSceneCount = useMemo(
+    () => scenes.filter((s) => s.prepped).length,
+    [scenes]
+  );
+  const prepPercent = useMemo(
+    () =>
+      scenes.length > 0
+        ? Math.round((preppedSceneCount / scenes.length) * 100)
+        : 0,
+    [preppedSceneCount, scenes.length]
+  );
+  // Forest green at the start, brightening as more scenes are ticked off.
+  const prepBarColor = useMemo(() => {
+    const t = prepPercent / 100;
+    const saturation = Math.round(42 + 35 * t);
+    const lightness = Math.round(34 + 35 * t);
+    return `hsl(150 ${saturation}% ${lightness}%)`;
+  }, [prepPercent]);
   const scriptsById = useMemo(
     () => new Map(scripts.map((s) => [s.id, s])),
     [scripts]
   );
+  const accentColor = useMemo(
+    () => getColorThemeHex(project.colorTheme),
+    [project.colorTheme]
+  );
+  // Set on the document root (not just this component's DOM subtree) so the
+  // accent also reaches dialogs/menus, which portal to <body>.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--project-accent", accentColor);
+    return () => {
+      document.documentElement.style.removeProperty("--project-accent");
+    };
+  }, [accentColor]);
 
   // Sheet for the active scene, falling back to a legacy project-wide sheet
   const activeCheatSheet = useMemo(() => {
@@ -261,8 +330,9 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
         <div className="flex min-w-0 flex-1 items-center gap-2 pr-8">
           <Clapperboard className="size-4 shrink-0 stroke-[1.5] text-muted-foreground" />
           <h1 className="truncate text-sm font-medium tracking-tight">
-            {bundle.project.title}
+            {project.title}
           </h1>
+          <ColorThemeSelector project={project} onProjectChange={setProject} />
         </div>
         <div className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center">
           <div className="pointer-events-auto">
@@ -271,8 +341,17 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
         </div>
         <div className="relative z-10 ml-auto flex shrink-0 items-center gap-1">
           {scenes.length > 0 ? (
+            <PrepPaceDialog
+              project={project}
+              scenes={scenes}
+              onProjectChange={setProject}
+              open={prepPaceOpen}
+              onOpenChange={setPrepPaceOpen}
+            />
+          ) : null}
+          {scenes.length > 0 ? (
             <ShootScheduleDialog
-              projectId={bundle.project.id}
+              projectId={project.id}
               scripts={scripts}
               scenes={scenes}
               onScenesChange={handleScenesChange}
@@ -280,7 +359,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
           ) : null}
           {scenes.length > 0 ? (
             <ExportMenu
-              projectId={bundle.project.id}
+              projectId={project.id}
               scripts={scripts}
               scenes={scenes}
               sceneId={activeSceneId}
@@ -292,7 +371,7 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
               type="button"
               variant="ghost"
               size="sm"
-              className="gap-1.5 text-xs text-muted-foreground"
+              className="gap-1.5 text-xs text-[var(--project-accent)]"
               onClick={() => setRightOpen((v) => !v)}
               title={rightOpen ? "Hide agent panel" : "Show agent panel"}
             >
@@ -514,6 +593,69 @@ export function ProjectWorkspace({ bundle }: { bundle: ProjectBundle }) {
           </aside>
         ) : null}
       </div>
+
+      <footer className="flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-border bg-muted/30 px-3 text-[11px] leading-none text-[var(--project-accent)] print:hidden">
+        {scenes.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setPrepPaceOpen(true)}
+            className="flex shrink-0 cursor-pointer items-center gap-2 transition-colors hover:text-foreground"
+            title="Tick scenes in the list to mark them prepped — click for pace details"
+          >
+            <span className="h-1 w-14 overflow-hidden rounded-full bg-border">
+              <span
+                className="block h-full rounded-full transition-[width,background-color] duration-300"
+                style={{
+                  width: `${prepPercent}%`,
+                  backgroundColor: prepBarColor,
+                }}
+              />
+            </span>
+            <span className="tabular-nums">
+              {preppedSceneCount} of {scenes.length}{" "}
+              {scenes.length === 1 ? "scene" : "scenes"} prepped ({prepPercent}
+              % DONE)
+            </span>
+          </button>
+        ) : null}
+        <div className="ml-auto flex min-w-0 items-center gap-4">
+          {footerDates ? (
+            <span className="hidden truncate sm:inline">
+              Today {footerDates.today}
+            </span>
+          ) : null}
+          {scenes.length > 0 && footerDates ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setPrepPaceOpen(true)}
+                className="cursor-pointer whitespace-nowrap tabular-nums transition-colors hover:text-foreground"
+                title="Set prep and shoot dates"
+              >
+                Prep start {footerDates.prepStart ?? "— not set"}
+              </button>
+              {project.techRecceDate ? (
+                <button
+                  type="button"
+                  onClick={() => setPrepPaceOpen(true)}
+                  className="cursor-pointer whitespace-nowrap tabular-nums transition-colors hover:text-foreground"
+                  title="Set tech recce date"
+                >
+                  Tech recce {footerDates.techRecce}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setPrepPaceOpen(true)}
+                className="cursor-pointer whitespace-nowrap tabular-nums transition-colors hover:text-foreground"
+                title="Set prep and shoot dates"
+              >
+                Shoot start {footerDates.shootStart ?? "— not set"}
+              </button>
+            </>
+          ) : null}
+        </div>
+      </footer>
     </div>
   );
 }

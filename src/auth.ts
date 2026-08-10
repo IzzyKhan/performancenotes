@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { users } from "@/db/schema";
 
 declare module "next-auth" {
@@ -37,7 +37,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           typeof credentials?.password === "string" ? credentials.password : "";
         if (!email || !password) return null;
 
-        const row = db
+        await ensureDb();
+        const row = await db
           .select()
           .from(users)
           .where(eq(users.email, email))

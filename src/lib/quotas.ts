@@ -25,10 +25,12 @@ export type QuotaResult =
   | { ok: true }
   | { ok: false; error: string; limit: number; used: number };
 
-export function checkAndIncrementChatQuota(userId: string): QuotaResult {
+export async function checkAndIncrementChatQuota(
+  userId: string
+): Promise<QuotaResult> {
   if (!authRequired() || userId === "local") return { ok: true };
 
-  const row = db.select().from(users).where(eq(users.id, userId)).get();
+  const row = await db.select().from(users).where(eq(users.id, userId)).get();
   if (!row) return { ok: false, error: "User not found", limit: 0, used: 0 };
 
   const currentMonth = monthKey();
@@ -47,7 +49,8 @@ export function checkAndIncrementChatQuota(userId: string): QuotaResult {
     };
   }
 
-  db.update(users)
+  await db
+    .update(users)
     .set({
       chatUsageCount: used + 1,
       chatUsageResetAt: currentMonth,
@@ -59,12 +62,13 @@ export function checkAndIncrementChatQuota(userId: string): QuotaResult {
 }
 
 /** Apply plan entitlement after Stripe webhook (Phase 4). */
-export function setUserPlan(
+export async function setUserPlan(
   userId: string,
-  plan: "free" | "organize" | "dramaturg" | "prep" | null,
+  plan: "free" | "solo" | "pro" | "dramaturg" | "prep" | "organize" | null,
   stripeCustomerId?: string
 ) {
-  db.update(users)
+  await db
+    .update(users)
     .set({
       plan,
       ...(stripeCustomerId ? { stripeCustomerId } : {}),

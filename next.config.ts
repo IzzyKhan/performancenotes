@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer"],
+  serverExternalPackages: ["@libsql/client", "@react-pdf/renderer"],
   experimental: {
     // proxy.ts matcher skips /api/* so uploads bypass proxy body buffering,
     // but keep headroom for screenplay PDFs on any proxied route. Note: when

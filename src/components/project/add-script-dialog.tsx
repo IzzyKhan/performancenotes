@@ -23,7 +23,7 @@ import {
 import { postWithRetry, snapshotFile } from "@/lib/upload-client";
 import { toast } from "sonner";
 import type { Script } from "@/types";
-import { showOrganizeUpgradeUI } from "@/lib/use-plan";
+import { scriptLimitMessage } from "@/lib/use-plan";
 
 function nextEpisodeNumber(scripts: Script[]): number {
   if (scripts.length === 0) return 1;
@@ -137,16 +137,14 @@ export function AddScriptDialog({
   }
 
   if (locked) {
-    if (!showOrganizeUpgradeUI()) return null;
     const message =
-      lockedMessage ??
-      "Upgrade to Organize to add more episodes to this project.";
+      lockedMessage ?? scriptLimitMessage();
     return (
       <Button
         type="button"
         size="sm"
         variant="outline"
-        className="gap-1.5 opacity-50"
+        className="gap-1.5 text-[var(--project-accent)] opacity-50"
         title={message}
         onClick={() => toast.info(message)}
       >
@@ -164,7 +162,7 @@ export function AddScriptDialog({
             type="button"
             size="sm"
             variant="outline"
-            className="gap-1.5"
+            className="gap-1.5 text-[var(--project-accent)]"
             disabled={disabled}
           />
         }
@@ -203,6 +201,7 @@ export function AddScriptDialog({
           </Button>
           <Button
             type="button"
+            variant="accent"
             disabled={submitting}
             onClick={() => void submit()}
           >

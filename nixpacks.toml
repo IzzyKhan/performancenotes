@@ -1,4 +1,4 @@
-# Nixpacks overrides for Railway — compile better-sqlite3 native bindings
+# Nixpacks overrides for Railway (Node 22 + native build tools for optional deps)
 [phases.setup]
 nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake"]
 

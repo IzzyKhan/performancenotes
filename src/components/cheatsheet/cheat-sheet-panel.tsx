@@ -166,7 +166,7 @@ export function CheatSheetPanel({
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="gap-1.5 text-[var(--project-accent)]"
           disabled={!dirty || saving}
           onClick={save}
         >
@@ -176,13 +176,18 @@ export function CheatSheetPanel({
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="gap-1.5 text-[var(--project-accent)]"
           onClick={printView}
         >
           <Printer className="size-3.5" />
           Print
         </Button>
-        <Button size="sm" className="gap-1.5" onClick={exportPdf}>
+        <Button
+          size="sm"
+          variant="accent"
+          className="gap-1.5"
+          onClick={exportPdf}
+        >
           <Download className="size-3.5" />
           This scene
         </Button>
@@ -190,7 +195,7 @@ export function CheatSheetPanel({
         <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
           <input
             type="checkbox"
-            className="size-3.5 accent-primary"
+            className="size-3.5 accent-[var(--project-accent)]"
             checked={includeCanvas}
             onChange={(e) => setIncludeCanvas(e.target.checked)}
           />

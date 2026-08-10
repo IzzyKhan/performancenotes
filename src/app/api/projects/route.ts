@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import {
   projects,
   scenes,
@@ -17,33 +17,36 @@ import {
   getOwnedProject,
   requireUser,
 } from "@/lib/auth-guard";
+import { mapProject } from "@/lib/mappers";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  await ensureDb();
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 
   if (!authRequired()) {
-    seedDemoIfEmpty();
-    const rows = db
+    await seedDemoIfEmpty();
+    const rows = await db
       .select()
       .from(projects)
       .orderBy(desc(projects.createdAt))
       .all();
-    return NextResponse.json(rows);
+    return NextResponse.json(rows.map(mapProject));
   }
 
-  const rows = db
+  const rows = await db
     .select()
     .from(projects)
     .where(eq(projects.userId, authResult.user.id))
     .orderBy(desc(projects.createdAt))
     .all();
-  return NextResponse.json(rows);
+  return NextResponse.json(rows.map(mapProject));
 }
 
 export async function POST(request: Request) {
+  await ensureDb();
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 
@@ -62,7 +65,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const allowed = checkProjectCreateAllowed(authResult.user.id);
+  const allowed = await checkProjectCreateAllowed(authResult.user.id);
   if (!allowed.ok) return allowed.error;
 
   const project = {
@@ -70,14 +73,21 @@ export async function POST(request: Request) {
     userId: authRequired() ? authResult.user.id : null,
     title,
     createdAt: nowIso(),
+    prepDaysPerWeek: 5 as const,
   };
 
-  db.insert(projects).values(project).run();
+  await db.insert(projects).values(project).run();
 
-  return NextResponse.json(project, { status: 201 });
+  const created = (await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, project.id))
+    .get())!;
+  return NextResponse.json(mapProject(created), { status: 201 });
 }
 
 export async function DELETE(request: Request) {
+  await ensureDb();
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 
@@ -87,17 +97,17 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const owned = getOwnedProject(id, authResult.user.id);
+  const owned = await getOwnedProject(id, authResult.user.id);
   if (!owned) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  db.delete(chatMessages).where(eq(chatMessages.projectId, id)).run();
-  db.delete(canvasNodes).where(eq(canvasNodes.projectId, id)).run();
-  db.delete(cheatSheets).where(eq(cheatSheets.projectId, id)).run();
-  db.delete(scenes).where(eq(scenes.projectId, id)).run();
-  db.delete(scripts).where(eq(scripts.projectId, id)).run();
-  db.delete(projects).where(eq(projects.id, id)).run();
+  await db.delete(chatMessages).where(eq(chatMessages.projectId, id)).run();
+  await db.delete(canvasNodes).where(eq(canvasNodes.projectId, id)).run();
+  await db.delete(cheatSheets).where(eq(cheatSheets.projectId, id)).run();
+  await db.delete(scenes).where(eq(scenes.projectId, id)).run();
+  await db.delete(scripts).where(eq(scripts.projectId, id)).run();
+  await db.delete(projects).where(eq(projects.id, id)).run();
 
   return NextResponse.json({ ok: true });
 }

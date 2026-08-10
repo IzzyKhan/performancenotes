@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db, sqlite } from "@/db";
+import { db, ensureDb } from "@/db";
 import { scenes } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import {
@@ -22,6 +22,7 @@ function noStoreJson(data: unknown, init?: { status?: number }) {
 }
 
 export async function PUT(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { projectId, assignments } = body as {
     projectId?: string;
@@ -38,7 +39,7 @@ export async function PUT(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const existing = db
+  const existing = await db
     .select()
     .from(scenes)
     .where(eq(scenes.projectId, projectId))
@@ -88,9 +89,10 @@ export async function PUT(request: Request) {
 
   const normalized = normalizeScheduleAssignments(complete);
 
-  const apply = sqlite.transaction(() => {
+  await db.transaction(async (tx) => {
     for (const a of normalized) {
-      db.update(scenes)
+      await tx
+        .update(scenes)
         .set({
           shootDay: a.shootDay,
           shootOrder: a.shootOrder,
@@ -99,7 +101,6 @@ export async function PUT(request: Request) {
         .run();
     }
   });
-  apply();
 
-  return noStoreJson(listScenesForProject(projectId));
+  return noStoreJson(await listScenesForProject(projectId));
 }

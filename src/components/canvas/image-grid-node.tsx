@@ -40,6 +40,7 @@ import {
   normalizeImageGridContent,
 } from "@/lib/image-grid";
 import { useMultiImagePick } from "@/components/canvas/multi-image-pick";
+import { useDeleteConfirm } from "@/components/canvas/use-delete-confirm";
 
 export type ImageGridFlowData = {
   canvasNode: CanvasNode;
@@ -134,6 +135,7 @@ export const ImageGridNode = memo(function ImageGridNode({
   const contentRef = useRef(content);
   contentRef.current = content;
   const [uploading, setUploading] = useState(false);
+  const { requestDelete, deleteDialog } = useDeleteConfirm();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -216,6 +218,23 @@ export const ImageGridNode = memo(function ImageGridNode({
   function openPicker() {
     requestPick((files) => {
       void uploadFiles(files);
+    });
+  }
+
+  function confirmRemoveImage(item: ImageGridItem) {
+    const caption = item.caption?.trim();
+    const name = caption
+      ? `“${caption}”`
+      : (item.imagePath.split("/").pop() ?? "This image");
+    requestDelete({
+      title: "Remove this image?",
+      description: `${name} will be removed from ${content.title || "the grid"}. The uploaded file stays available for other nodes.`,
+      confirmLabel: "Remove",
+      onConfirm: () =>
+        commit({
+          ...content,
+          images: content.images.filter((img) => img.id !== item.id),
+        }),
     });
   }
 
@@ -323,12 +342,7 @@ export const ImageGridNode = memo(function ImageGridNode({
                         ),
                       })
                     }
-                    onRemove={() =>
-                      commit({
-                        ...content,
-                        images: content.images.filter((img) => img.id !== item.id),
-                      })
-                    }
+                    onRemove={() => confirmRemoveImage(item)}
                   />
                 ))}
               </div>
@@ -351,6 +365,8 @@ export const ImageGridNode = memo(function ImageGridNode({
           {uploading ? "Uploading…" : "Add images"}
         </Button>
       </div>
+
+      {deleteDialog}
     </div>
   );
 });

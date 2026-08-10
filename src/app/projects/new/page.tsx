@@ -18,10 +18,11 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   usePlan,
-  UPGRADE_PROJECT_LIMIT_MESSAGE,
-  UPGRADE_SCRIPT_LIMIT_MESSAGE,
-  showOrganizeUpgradeUI,
+  projectLimitMessage,
+  scriptLimitMessage,
+  showBillingUpgradeUI,
 } from "@/lib/use-plan";
+import { startProCheckout } from "@/lib/billing-client";
 
 type ProjectKind = "single" | "series";
 
@@ -365,16 +366,25 @@ export default function NewProjectPage() {
           <div className="mt-8 rounded-md border border-border bg-muted/30 px-4 py-5">
             <p className="text-sm font-medium">You&apos;re at the Free plan limit</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {showOrganizeUpgradeUI()
-                ? UPGRADE_PROJECT_LIMIT_MESSAGE
-                : "The Free plan includes one project."}
+              {projectLimitMessage()}
             </p>
-            <Link
-              href="/"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-4")}
-            >
-              Back to your project
-            </Link>
+            <div className="mt-4 flex items-center gap-2">
+              {showBillingUpgradeUI() ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void startProCheckout()}
+                >
+                  Upgrade to Pro — $15/mo
+                </Button>
+              ) : null}
+              <Link
+                href="/"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+              >
+                Back to your project
+              </Link>
+            </div>
           </div>
         ) : null}
 
@@ -384,9 +394,7 @@ export default function NewProjectPage() {
             <div
               className={cn(
                 "grid gap-2",
-                seriesLocked && showOrganizeUpgradeUI()
-                  ? "sm:grid-cols-2"
-                  : "sm:grid-cols-1"
+                seriesLocked ? "sm:grid-cols-2" : "sm:grid-cols-1"
               )}
             >
               <button
@@ -407,13 +415,14 @@ export default function NewProjectPage() {
                   Feature, short film, or one-off scene
                 </span>
               </button>
-              {seriesLocked && showOrganizeUpgradeUI() ? (
+              {seriesLocked ? (
               <button
                 type="button"
                 aria-disabled={seriesLocked}
-                title={UPGRADE_SCRIPT_LIMIT_MESSAGE}
+                title={scriptLimitMessage()}
                 onClick={() => {
-                  toast.info(UPGRADE_SCRIPT_LIMIT_MESSAGE);
+                  toast.info(scriptLimitMessage());
+                  if (showBillingUpgradeUI()) void startProCheckout();
                 }}
                 className={cn(
                   "flex flex-col items-start gap-1 rounded-md border px-3 py-3 text-left transition-colors",
@@ -425,10 +434,12 @@ export default function NewProjectPage() {
                   Series / multi-script
                 </span>
                 <span className="text-xs font-normal text-muted-foreground">
-                  Organize plan — unlimited episodes
+                  {showBillingUpgradeUI()
+                    ? "Pro plan — unlimited episodes"
+                    : "Pro plan — launching soon"}
                 </span>
               </button>
-              ) : seriesLocked ? null : (
+              ) : (
               <button
                 type="button"
                 onClick={() => chooseKind("series")}
@@ -648,6 +659,11 @@ export default function NewProjectPage() {
                       )}
                     </div>
                   ))}
+
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">
+                    We parse/store scene headings only — dialogue and action
+                    never leave your device.
+                  </p>
                 </div>
               ) : null}
 

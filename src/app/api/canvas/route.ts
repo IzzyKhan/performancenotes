@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { canvasNodes } from "@/db/schema";
 import { requireProjectAccess } from "@/lib/auth-guard";
 import { createId, nowIso } from "@/lib/id";
@@ -10,6 +10,7 @@ import type { CanvasNodeType } from "@/types";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   const sceneId = searchParams.get("sceneId");
@@ -20,12 +21,13 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const rows = db
-    .select()
-    .from(canvasNodes)
-    .where(eq(canvasNodes.projectId, projectId))
-    .all()
-    .map(mapCanvasNode);
+  const rows = (
+    await db
+      .select()
+      .from(canvasNodes)
+      .where(eq(canvasNodes.projectId, projectId))
+      .all()
+  ).map(mapCanvasNode);
 
   // Scene filter keeps project-wide (null-sceneId) nodes visible everywhere
   const filtered = sceneId
@@ -36,6 +38,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { projectId, sceneId = null, type, content, positionX, positionY, label } =
     body as {
@@ -59,7 +62,8 @@ export async function POST(request: Request) {
   if ("error" in access) return access.error;
 
   const id = createId("node");
-  db.insert(canvasNodes)
+  await db
+    .insert(canvasNodes)
     .values({
       id,
       projectId,
@@ -73,15 +77,16 @@ export async function POST(request: Request) {
     })
     .run();
 
-  const created = db
+  const created = (await db
     .select()
     .from(canvasNodes)
     .where(eq(canvasNodes.id, id))
-    .get()!;
+    .get())!;
   return NextResponse.json(mapCanvasNode(created), { status: 201 });
 }
 
 export async function PATCH(request: Request) {
+  await ensureDb();
   const body = await request.json();
   const { id, content, positionX, positionY, label, type } = body;
 
@@ -89,7 +94,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const existing = db
+  const existing = await db
     .select()
     .from(canvasNodes)
     .where(eq(canvasNodes.id, id))
@@ -108,24 +113,25 @@ export async function PATCH(request: Request) {
   if (label !== undefined) updates.label = label;
   if (type !== undefined) updates.type = type;
 
-  db.update(canvasNodes).set(updates).where(eq(canvasNodes.id, id)).run();
+  await db.update(canvasNodes).set(updates).where(eq(canvasNodes.id, id)).run();
 
-  const updated = db
+  const updated = (await db
     .select()
     .from(canvasNodes)
     .where(eq(canvasNodes.id, id))
-    .get()!;
+    .get())!;
   return NextResponse.json(mapCanvasNode(updated));
 }
 
 export async function DELETE(request: Request) {
+  await ensureDb();
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const existing = db
+  const existing = await db
     .select()
     .from(canvasNodes)
     .where(eq(canvasNodes.id, id))
@@ -137,6 +143,6 @@ export async function DELETE(request: Request) {
   const access = await requireProjectAccess(existing.projectId);
   if ("error" in access) return access.error;
 
-  db.delete(canvasNodes).where(eq(canvasNodes.id, id)).run();
+  await db.delete(canvasNodes).where(eq(canvasNodes.id, id)).run();
   return NextResponse.json({ ok: true });
 }

@@ -16,7 +16,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Download, Eye, GripVertical } from "lucide-react";
+import { Download, Eye, GripVertical, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -143,18 +144,25 @@ export function ExportDialog({
     () => new Set(DEFAULT_EXPORT_TYPE_ORDER)
   );
   const [busy, setBusy] = useState<"preview" | "download" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
-    url: string;
+    url: string | null;
     filename: string;
+    loading: boolean;
+    error: string | null;
   } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
   );
 
+  function revokePreviewUrl(url: string | null) {
+    if (url) URL.revokeObjectURL(url);
+  }
+
   function revokePreview() {
     setPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev.url);
+      if (prev?.url) revokePreviewUrl(prev.url);
       return null;
     });
   }
@@ -168,13 +176,18 @@ export function ExportDialog({
       setTypeOrder([...DEFAULT_EXPORT_TYPE_ORDER]);
       setEnabledTypes(new Set(DEFAULT_EXPORT_TYPE_ORDER));
       setBusy(null);
+      setActionError(null);
     } else {
-      revokePreview();
+      // Keep preview open independently; only clear dialog-local error.
+      setActionError(null);
     }
   }
 
   function handlePreviewOpenChange(next: boolean) {
-    if (!next) revokePreview();
+    if (!next) {
+      revokePreview();
+      setBusy((b) => (b === "preview" ? null : b));
+    }
   }
 
   function toggle(id: string) {
@@ -215,12 +228,40 @@ export function ExportDialog({
 
   async function runPreview() {
     const params = buildParams(true);
-    if (!params) return;
+    if (!params) {
+      setActionError("Select at least one scene to preview.");
+      return;
+    }
+    setActionError(null);
     setBusy("preview");
+    // Open preview immediately with a loading panel so long packs don't feel hung.
+    setPreview((prev) => {
+      if (prev?.url) revokePreviewUrl(prev.url);
+      return {
+        url: null,
+        filename: "Building…",
+        loading: true,
+        error: null,
+      };
+    });
     try {
-      revokePreview();
-      const result = await fetchExportPreview(params);
-      if (result) setPreview(result);
+      const result = await fetchExportPreview(params, { toastOnError: false });
+      if (result.ok) {
+        setPreview({
+          url: result.url,
+          filename: result.filename,
+          loading: false,
+          error: null,
+        });
+      } else {
+        setPreview({
+          url: null,
+          filename: "Export preview",
+          loading: false,
+          error: result.error,
+        });
+        setActionError(result.error);
+      }
     } finally {
       setBusy(null);
     }
@@ -228,18 +269,29 @@ export function ExportDialog({
 
   async function runDownload() {
     const params = buildParams(false);
-    if (!params) return;
+    if (!params) {
+      setActionError("Select at least one scene to export.");
+      return;
+    }
+    setActionError(null);
     setBusy("download");
     try {
-      await downloadExport(params);
-      revokePreview();
-      setOpen(false);
+      const result = await downloadExport(params, { toastOnError: false });
+      if (result.ok) {
+        toast.success(asZip ? "Scene packs downloaded" : "PDF downloaded");
+        revokePreview();
+        setOpen(false);
+      } else {
+        setActionError(result.error);
+        toast.error(result.error);
+      }
     } finally {
       setBusy(null);
     }
   }
 
   const selectedCount = selected.size;
+  const noScenes = orderedScenes.length === 0;
 
   return (
     <>
@@ -250,7 +302,10 @@ export function ExportDialog({
               type="button"
               size={triggerSize}
               variant={triggerVariant}
-              className="gap-1.5"
+              className={cn(
+                "gap-1.5",
+                triggerVariant === "ghost" && "text-[var(--project-accent)]"
+              )}
             />
           }
         >
@@ -285,6 +340,7 @@ export function ExportDialog({
                   size="sm"
                   variant="outline"
                   className="h-7 text-[11px]"
+                  disabled={noScenes}
                   onClick={() => setSelected(new Set(allIds))}
                 >
                   Select all
@@ -294,6 +350,7 @@ export function ExportDialog({
                   size="sm"
                   variant="outline"
                   className="h-7 text-[11px]"
+                  disabled={noScenes}
                   onClick={() => setSelected(new Set())}
                 >
                   Deselect all
@@ -314,25 +371,32 @@ export function ExportDialog({
                 </span>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3">
-                <ul className="space-y-1 py-2">
-                  {orderedScenes.map((scene) => {
-                    const script = scriptsById.get(scene.scriptId) ?? null;
-                    const label = sceneSlugLabel(scene, script, multiScript);
-                    return (
-                      <li key={scene.id}>
-                        <label className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 text-xs hover:bg-muted/50">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 size-3.5 shrink-0 accent-primary"
-                            checked={selected.has(scene.id)}
-                            onChange={() => toggle(scene.id)}
-                          />
-                          <span className="min-w-0 leading-snug">{label}</span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
+                {noScenes ? (
+                  <p className="px-1.5 py-6 text-xs text-muted-foreground">
+                    No scenes in this project yet. Import a script or add a
+                    scene first.
+                  </p>
+                ) : (
+                  <ul className="space-y-1 py-2">
+                    {orderedScenes.map((scene) => {
+                      const script = scriptsById.get(scene.scriptId) ?? null;
+                      const label = sceneSlugLabel(scene, script, multiScript);
+                      return (
+                        <li key={scene.id}>
+                          <label className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 text-xs hover:bg-muted/50">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 size-3.5 shrink-0 accent-primary"
+                              checked={selected.has(scene.id)}
+                              onChange={() => toggle(scene.id)}
+                            />
+                            <span className="min-w-0 leading-snug">{label}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             </div>
 
@@ -416,27 +480,42 @@ export function ExportDialog({
             </div>
           </div>
 
+          {actionError ? (
+            <div className="shrink-0 border-t border-border bg-destructive/5 px-4 py-2 text-xs text-destructive">
+              {actionError}
+            </div>
+          ) : null}
+
           <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-4 py-3">
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="gap-1.5"
+              className="gap-1.5 text-[var(--project-accent)]"
               disabled={selectedCount === 0 || asZip || busy != null}
               title={asZip ? "Preview is for single PDF only" : undefined}
               onClick={() => void runPreview()}
             >
-              <Eye className="size-3.5" />
+              {busy === "preview" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Eye className="size-3.5" />
+              )}
               {busy === "preview" ? "Opening…" : "Preview"}
             </Button>
             <Button
               type="button"
+              variant="accent"
               size="sm"
               className="gap-1.5"
               disabled={selectedCount === 0 || busy != null}
               onClick={() => void runDownload()}
             >
-              <Download className="size-3.5" />
+              {busy === "download" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}
               {busy === "download" ? "Exporting…" : "Download"}
             </Button>
           </div>
@@ -447,6 +526,9 @@ export function ExportDialog({
         open={preview != null}
         url={preview?.url ?? null}
         filename={preview?.filename}
+        loading={preview?.loading ?? false}
+        error={preview?.error ?? null}
+        downloading={busy === "download"}
         onOpenChange={handlePreviewOpenChange}
         onDownload={() => void runDownload()}
       />

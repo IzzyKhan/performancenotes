@@ -14,6 +14,7 @@ export type DiffOldScene = {
   sceneNumber: string | null;
   shootDay: number | null;
   shootOrder: number | null;
+  prepped: boolean;
   orderIndex: number;
   rawText: string;
 };
@@ -55,6 +56,7 @@ function toOld(s: Scene): DiffOldScene {
     sceneNumber: s.sceneNumber,
     shootDay: s.shootDay,
     shootOrder: s.shootOrder,
+    prepped: s.prepped,
     orderIndex: s.orderIndex,
     rawText: s.rawText,
   };

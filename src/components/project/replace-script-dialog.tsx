@@ -288,6 +288,7 @@ export function ReplaceScriptDialog({
           </Button>
           <Button
             type="button"
+            variant="accent"
             size="sm"
             className="gap-1.5"
             disabled={applying}

@@ -101,6 +101,18 @@ export interface Project {
   userId?: string | null;
   title: string;
   createdAt: string;
+  /** ISO date (YYYY-MM-DD) when prep begins. */
+  prepStartDate: string | null;
+  /** ISO date (YYYY-MM-DD) when principal photography begins. */
+  shootStartDate: string | null;
+  /** ISO date (YYYY-MM-DD) when the tech recce takes place. */
+  techRecceDate: string | null;
+  /** When true, prep must finish the day before tech recce instead of shoot start. */
+  prepEndBeforeTechRecce: boolean;
+  /** How many days per week the user will prep (1–7). */
+  prepDaysPerWeek: number;
+  /** Accent colour id (see src/lib/color-themes.ts) — "neutral" is the unstyled default. */
+  colorTheme: string;
 }
 
 export interface Script {
@@ -123,6 +135,8 @@ export interface Scene {
   sceneNumber: string | null;
   shootDay: number | null;
   shootOrder: number | null;
+  /** True when the user has marked this scene as prepped. */
+  prepped: boolean;
   rawText: string;
   sourceType: SceneSourceType;
   parsedMeta: ParsedMeta | null;

@@ -1,13 +1,13 @@
 import { ProjectWorkspace } from "@/components/project/project-workspace";
 import { auth } from "@/auth";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import {
   projects,
   canvasNodes,
   chatMessages,
   cheatSheets,
 } from "@/db/schema";
-import { mapCanvasNode, mapCheatSheet } from "@/lib/mappers";
+import { mapCanvasNode, mapCheatSheet, mapProject } from "@/lib/mappers";
 import {
   listScenesForProject,
   listScriptsForProject,
@@ -26,30 +26,30 @@ async function loadBundle(
   userId: string | null
 ): Promise<ProjectBundle | null> {
   const project = userId
-    ? getOwnedProject(id, userId)
-    : db.select().from(projects).where(eq(projects.id, id)).get();
+    ? await getOwnedProject(id, userId)
+    : await db.select().from(projects).where(eq(projects.id, id)).get();
   if (!project) return null;
 
-  const nodeRows = db
+  const nodeRows = await db
     .select()
     .from(canvasNodes)
     .where(eq(canvasNodes.projectId, id))
     .all();
-  const messageRows = db
+  const messageRows = await db
     .select()
     .from(chatMessages)
     .where(eq(chatMessages.projectId, id))
     .all();
-  const cheatRows = db
+  const cheatRows = await db
     .select()
     .from(cheatSheets)
     .where(eq(cheatSheets.projectId, id))
     .all();
 
   return {
-    project,
-    scripts: listScriptsForProject(id),
-    scenes: listScenesForProject(id),
+    project: mapProject(project),
+    scripts: await listScriptsForProject(id),
+    scenes: await listScenesForProject(id),
     canvasNodes: nodeRows.map(mapCanvasNode),
     chatMessages: messageRows.map((m) => ({
       id: m.id,
@@ -68,6 +68,7 @@ export default async function ProjectPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await ensureDb();
   const { id } = await params;
 
   if (authRequired()) {

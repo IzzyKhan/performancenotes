@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import {
   canvasNodes,
   chatMessages,
@@ -124,6 +124,7 @@ const CHEAT_SHEET_TOOL: Anthropic.Tool = {
 };
 
 export async function GET(request: Request) {
+  await ensureDb();
   if (!isAgentEnabled()) {
     return NextResponse.json({ error: AGENT_DISABLED_MSG }, { status: 403 });
   }
@@ -137,7 +138,7 @@ export async function GET(request: Request) {
   const access = await requireProjectAccess(projectId);
   if ("error" in access) return access.error;
 
-  const rows = db
+  const rows = await db
     .select()
     .from(chatMessages)
     .where(eq(chatMessages.projectId, projectId))
@@ -196,6 +197,7 @@ export async function POST(request: Request) {
       };
 
       try {
+        await ensureDb();
         send("status", { phase: "preparing" });
 
         const access = await requireProjectAccess(projectId);
@@ -209,14 +211,14 @@ export async function POST(request: Request) {
         const { project, user } = access;
 
         const { checkAndIncrementChatQuota } = await import("@/lib/quotas");
-        const quota = checkAndIncrementChatQuota(user.id);
+        const quota = await checkAndIncrementChatQuota(user.id);
         if (!quota.ok) {
           send("error", { error: quota.error });
           return;
         }
 
-        const projectScripts = listScriptsForProject(projectId);
-        const allScenes = listScenesForProject(projectId);
+        const projectScripts = await listScriptsForProject(projectId);
+        const allScenes = await listScenesForProject(projectId);
 
         const scene =
           (sceneId ? allScenes.find((s) => s.id === sceneId) : undefined) ??
@@ -224,20 +226,23 @@ export async function POST(request: Request) {
           null;
         const activeSceneId = scene?.id ?? null;
 
-        const nodeRows = db
-          .select()
-          .from(canvasNodes)
-          .where(eq(canvasNodes.projectId, projectId))
-          .all()
+        const nodeRows = (
+          await db
+            .select()
+            .from(canvasNodes)
+            .where(eq(canvasNodes.projectId, projectId))
+            .all()
+        )
           .map(mapCanvasNode)
           .filter((n) => n.sceneId === null || n.sceneId === activeSceneId);
-        const history = db
-          .select()
-          .from(chatMessages)
-          .where(eq(chatMessages.projectId, projectId))
-          .all()
-          .filter((m) => m.sceneId === null || m.sceneId === activeSceneId);
-        const cheatRow = db
+        const history = (
+          await db
+            .select()
+            .from(chatMessages)
+            .where(eq(chatMessages.projectId, projectId))
+            .all()
+        ).filter((m) => m.sceneId === null || m.sceneId === activeSceneId);
+        const cheatRow = await db
           .select()
           .from(cheatSheets)
           .where(
@@ -262,7 +267,8 @@ export async function POST(request: Request) {
             : message.trim();
 
         const userMsgId = createId("msg");
-        db.insert(chatMessages)
+        await db
+          .insert(chatMessages)
           .values({
             id: userMsgId,
             projectId,
@@ -375,10 +381,11 @@ export async function POST(request: Request) {
                 eq(cheatSheets.projectId, projectId),
                 isNull(cheatSheets.sceneId)
               );
-          const existing = db.select().from(cheatSheets).where(scope).get();
+          const existing = await db.select().from(cheatSheets).where(scope).get();
 
           if (existing) {
-            db.update(cheatSheets)
+            await db
+              .update(cheatSheets)
               .set({
                 content: JSON.stringify(normalized),
                 version: existing.version + 1,
@@ -387,7 +394,8 @@ export async function POST(request: Request) {
               .where(eq(cheatSheets.id, existing.id))
               .run();
           } else {
-            db.insert(cheatSheets)
+            await db
+              .insert(cheatSheets)
               .values({
                 id: createId("sheet"),
                 projectId,
@@ -399,7 +407,7 @@ export async function POST(request: Request) {
               .run();
           }
 
-          const saved = db.select().from(cheatSheets).where(scope).get()!;
+          const saved = (await db.select().from(cheatSheets).where(scope).get())!;
           send("cheatsheet", mapCheatSheet(saved));
 
           if (!fullText.trim()) {
@@ -410,7 +418,8 @@ export async function POST(request: Request) {
         }
 
         const assistantId = createId("msg");
-        db.insert(chatMessages)
+        await db
+          .insert(chatMessages)
           .values({
             id: assistantId,
             projectId,

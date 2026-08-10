@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { users } from "@/db/schema";
 import { authRequired, requireUser } from "@/lib/auth-guard";
 import { entitlementsForPlan, normalizePlan } from "@/lib/entitlements";
@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 /** Current user's plan + entitlement limits, for client-side gating. */
 export async function GET() {
+  await ensureDb();
   const authResult = await requireUser();
   if ("error" in authResult) return authResult.error;
 
@@ -16,14 +17,15 @@ export async function GET() {
   if (!authRequired() || authResult.user.id === "local") {
     return NextResponse.json({
       email: authResult.user.email,
-      plan: "organize",
+      plan: "pro",
       planLabel: "Local",
       maxProjects: null,
       maxScriptsPerProject: null,
+      maxScenesPerProject: null,
     });
   }
 
-  const row = db
+  const row = await db
     .select({ plan: users.plan })
     .from(users)
     .where(eq(users.id, authResult.user.id))
@@ -37,5 +39,6 @@ export async function GET() {
     planLabel: ent.label,
     maxProjects: ent.maxProjects,
     maxScriptsPerProject: ent.maxScriptsPerProject,
+    maxScenesPerProject: ent.maxScenesPerProject,
   });
 }

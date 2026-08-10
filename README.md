@@ -7,7 +7,7 @@ AI-native performance notes for directors. Upload a scene, riff on an infinite *
 - Next.js (App Router) + TypeScript + Tailwind + shadcn/ui
 - React Flow (`@xyflow/react`) for the instinct canvas
 - Anthropic Claude for the agent
-- SQLite via Drizzle + `better-sqlite3` (local / Railway volume persistence)
+- SQLite via Drizzle + `@libsql/client` (local file, or Turso when `TURSO_DATABASE_URL` is set)
 - `unpdf` for screenplay PDF text extraction
 - `@react-pdf/renderer` for cheat sheet PDF export
 
@@ -59,12 +59,15 @@ On first load, a demo project (**Kitchen Midnight**) is seeded automatically so 
 
 ## Data
 
-Everything lives under `data/`:
+Everything lives under `data/` locally:
 
-- `data/performancenotes.db` — SQLite database
+- `data/performancenotes.db` — SQLite database (via `@libsql/client` `file:` URL)
 - `data/uploads/` — uploaded images and audio
 
-On Railway, mount a **volume** at `/app/data` so this directory survives redeploys.
+**Stage 5a:** set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` to use hosted Turso instead of the local file.  
+**Stage 5b (next):** R2 for uploads. Until then, Railway still needs a volume for `data/uploads` (or local disk in dev).
+
+**Launch strategy:** finish build-out (Turso + R2, Stripe test-mode) before director access — see [`docs/launchnotes.md`](docs/launchnotes.md).
 
 ## Deploy on Railway (Phase 1 pilot)
 
@@ -77,7 +80,7 @@ Commit and push this repo to a GitHub remote.
 ### 2. Create the Railway service
 
 1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub** → select this repo.
-2. Railway will build with Nixpacks using [`nixpacks.toml`](nixpacks.toml) / [`railway.toml`](railway.toml) (`better-sqlite3` needs python/gcc/make).
+2. Railway will build with Nixpacks using [`nixpacks.toml`](nixpacks.toml) / [`railway.toml`](railway.toml).
 
 ### 3. Persistent volume
 
@@ -97,6 +100,8 @@ Without this volume, SQLite and uploads reset on every deploy.
 | `AUTH_SECRET` | Recommended | Enables Auth.js accounts; generate with `openssl rand -base64 32` |
 | `AUTH_URL` | Prod | Public Railway URL, e.g. `https://….up.railway.app` |
 | `ALLOW_SIGNUP` | Optional | Default allow; set `false` for invite-only |
+| `TURSO_DATABASE_URL` | Stage 5a | Hosted SQLite (Turso). Omit for local `data/performancenotes.db`. |
+| `TURSO_AUTH_TOKEN` | Stage 5a | Required with Turso URL |
 | `NODE_ENV` | Auto | `production` on Railway |
 | `PORT` | Auto | Set by Railway; start command binds to it |
 
@@ -136,4 +141,5 @@ Without `AUTH_SECRET`, the app stays open (Phase 1-style shared workspace). With
 
 ## Roadmap
 
-Phases 2–4 (accounts → cloud DB/blob → public SaaS) are spelled out in [docs/ROADMAP.md](docs/ROADMAP.md).
+Phases 2–4 (accounts → cloud DB/blob → public SaaS) are spelled out in [docs/ROADMAP.md](docs/ROADMAP.md).  
+Launch sequence and director access playbook: [docs/launchnotes.md](docs/launchnotes.md).

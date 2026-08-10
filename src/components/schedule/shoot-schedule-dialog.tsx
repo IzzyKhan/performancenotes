@@ -296,7 +296,7 @@ function DayColumn({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="size-6 text-muted-foreground hover:text-destructive"
+            className="size-6 text-[var(--project-accent)] hover:text-destructive"
             title={`Remove ${title}`}
             aria-label={`Remove ${title}`}
             onClick={onDelete}
@@ -730,7 +730,7 @@ export function ShootScheduleDialog({
             type="button"
             variant="ghost"
             size="sm"
-            className="gap-1.5 text-xs text-muted-foreground"
+            className="gap-1.5 text-xs text-[var(--project-accent)]"
           />
         }
       >
@@ -850,6 +850,7 @@ export function ShootScheduleDialog({
           </Button>
           <Button
             type="button"
+            variant="accent"
             onClick={() => void save()}
             disabled={saving || !isDirty}
           >
@@ -898,7 +899,7 @@ export function ShootScheduleDialog({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={applyBulkShootDays}>
+          <Button type="button" variant="accent" onClick={applyBulkShootDays}>
             Create days
           </Button>
         </DialogFooter>
@@ -934,6 +935,7 @@ export function ShootScheduleDialog({
             </Button>
             <Button
               type="button"
+              variant="accent"
               disabled={saving}
               onClick={() => void saveAndClose()}
             >

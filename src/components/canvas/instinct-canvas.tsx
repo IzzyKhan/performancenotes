@@ -937,7 +937,7 @@ function InstinctCanvasInner({
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
-              "inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-transparent bg-primary px-2.5 text-xs font-normal text-primary-foreground hover:bg-primary/90"
+              "inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-transparent bg-[var(--project-accent)] px-2.5 text-xs font-normal text-white hover:opacity-90"
             )}
           >
             <Plus className="size-3.5" />
@@ -1035,7 +1035,7 @@ function InstinctCanvasInner({
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 gap-1.5 border-border bg-card px-2.5 text-xs font-normal shadow-none"
+          className="h-7 gap-1.5 border-border bg-card px-2.5 text-xs font-normal text-[var(--project-accent)] shadow-none"
           onClick={onScenePanelToggle}
           title={scenePanelOpen ? "Hide scene panel" : "Show scene panel"}
         >
@@ -1064,7 +1064,7 @@ function InstinctCanvasInner({
       </div>
 
       {sceneHeading ? (
-        <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[55%] truncate rounded-md border border-border bg-card/90 px-2.5 py-1.5 text-xs font-normal tracking-wide text-foreground/90 backdrop-blur-sm">
+        <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[55%] truncate rounded-md border border-border bg-card/90 px-2.5 py-1.5 text-xs font-normal tracking-wide text-[var(--project-accent)] backdrop-blur-sm">
           {sceneHeading}
         </div>
       ) : null}

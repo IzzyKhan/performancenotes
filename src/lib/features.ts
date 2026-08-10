@@ -10,7 +10,10 @@ export function isAgentEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ENABLE_AGENT === "true";
 }
 
-/** Organize $15 Checkout + upgrade CTAs (Stage 4). Off until Stripe is live. */
-export function isOrganizeCheckoutEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ENABLE_ORGANIZE_CHECKOUT === "true";
+/** Paid-tier (Solo/Pro) Checkout + upgrade CTAs (Stage 4). Off until Stripe is live. */
+export function isBillingCheckoutEnabled(): boolean {
+  return (
+    process.env.NEXT_PUBLIC_ENABLE_BILLING_CHECKOUT === "true" ||
+    process.env.NEXT_PUBLIC_ENABLE_ORGANIZE_CHECKOUT === "true"
+  );
 }

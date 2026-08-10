@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, ensureDb } from "@/db";
 import { users } from "@/db/schema";
 import { createId, nowIso } from "@/lib/id";
 import { authRequired } from "@/lib/auth-guard";
@@ -9,6 +9,7 @@ import { authRequired } from "@/lib/auth-guard";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  await ensureDb();
   if (!authRequired()) {
     return NextResponse.json(
       { error: "Set AUTH_SECRET to enable signup" },
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = db.select().from(users).where(eq(users.email, email)).get();
+  const existing = await db.select().from(users).where(eq(users.email, email)).get();
   if (existing) {
     return NextResponse.json(
       { error: "An account with that email already exists" },
@@ -48,7 +49,8 @@ export async function POST(request: Request) {
 
   const id = createId("user");
   const passwordHash = await hash(password, 10);
-  db.insert(users)
+  await db
+    .insert(users)
     .values({
       id,
       email,
