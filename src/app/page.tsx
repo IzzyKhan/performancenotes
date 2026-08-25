@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { EditProjectDialog } from "@/components/project/edit-project-dialog";
 import { LandingPage } from "@/components/marketing/landing-page";
+import { isOpenAccess } from "@/lib/features";
 import { usePlan, projectLimitMessage, showBillingUpgradeUI } from "@/lib/use-plan";
 import { openBillingPortal, startProCheckout } from "@/lib/billing-client";
 import type { Project } from "@/types";
@@ -140,7 +141,7 @@ export default function HomePage() {
                 <span className="hidden sm:inline">Manage billing</span>
               </Button>
             ) : null}
-            {status === "authenticated" ? (
+            {isOpenAccess() ? null : status === "authenticated" ? (
               <Button
                 type="button"
                 variant="ghost"

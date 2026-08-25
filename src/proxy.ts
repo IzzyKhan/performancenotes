@@ -21,6 +21,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (process.env.NEXT_PUBLIC_OPEN_ACCESS === "true") {
+    return NextResponse.next();
+  }
+
   const password = process.env.BASIC_AUTH_PASSWORD;
   if (!password) {
     return NextResponse.next();

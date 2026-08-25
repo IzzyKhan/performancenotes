@@ -113,7 +113,7 @@ export async function POST(request: Request) {
     );
     return NextResponse.json(
       {
-        error: `Could not save the file on the server (${message}). If this persists, the storage volume may be missing or full.`,
+        error: `Could not save the file (${message}). If this persists, check object storage (R2) credentials or local disk space.`,
       },
       { status: 500 }
     );

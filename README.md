@@ -8,6 +8,7 @@ AI-native performance notes for directors. Upload a scene, riff on an infinite *
 - React Flow (`@xyflow/react`) for the instinct canvas
 - Anthropic Claude for the agent
 - SQLite via Drizzle + `@libsql/client` (local file, or Turso when `TURSO_DATABASE_URL` is set)
+- Uploads via local `data/uploads` or Cloudflare R2 (`S3_*` env)
 - `unpdf` for screenplay PDF text extraction
 - `@react-pdf/renderer` for cheat sheet PDF export
 
@@ -65,7 +66,7 @@ Everything lives under `data/` locally:
 - `data/uploads/` — uploaded images and audio
 
 **Stage 5a:** set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` to use hosted Turso instead of the local file.  
-**Stage 5b (next):** R2 for uploads. Until then, Railway still needs a volume for `data/uploads` (or local disk in dev).
+**Stage 5b:** set `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT` (R2) to store uploads off-disk. Local default remains `data/uploads`.
 
 **Launch strategy:** finish build-out (Turso + R2, Stripe test-mode) before director access — see [`docs/launchnotes.md`](docs/launchnotes.md).
 
@@ -82,13 +83,12 @@ Commit and push this repo to a GitHub remote.
 1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub** → select this repo.
 2. Railway will build with Nixpacks using [`nixpacks.toml`](nixpacks.toml) / [`railway.toml`](railway.toml).
 
-### 3. Persistent volume
+### 3. Persistent volume (interim)
+
+Not needed once Turso + R2 env vars are set. Until then:
 
 1. Service → **Volumes** → **Add Volume**
-2. **Mount path:** `/app/data`  
-   (must match `process.cwd()/data` — Railway’s app root is `/app`)
-
-Without this volume, SQLite and uploads reset on every deploy.
+2. **Mount path:** `/app/data`
 
 ### 4. Environment variables
 
@@ -100,8 +100,14 @@ Without this volume, SQLite and uploads reset on every deploy.
 | `AUTH_SECRET` | Recommended | Enables Auth.js accounts; generate with `openssl rand -base64 32` |
 | `AUTH_URL` | Prod | Public Railway URL, e.g. `https://….up.railway.app` |
 | `ALLOW_SIGNUP` | Optional | Default allow; set `false` for invite-only |
+| `NEXT_PUBLIC_OPEN_ACCESS` | Optional | `true` = no sign-in (recruiter demo). Anyone with the URL sees all projects. Redeploy after setting. |
 | `TURSO_DATABASE_URL` | Stage 5a | Hosted SQLite (Turso). Omit for local `data/performancenotes.db`. |
 | `TURSO_AUTH_TOKEN` | Stage 5a | Required with Turso URL |
+| `S3_BUCKET` | Stage 5b | R2 bucket name. Omit for local `data/uploads`. |
+| `S3_REGION` | Stage 5b | `auto` for R2 |
+| `S3_ACCESS_KEY_ID` | Stage 5b | R2 API token access key |
+| `S3_SECRET_ACCESS_KEY` | Stage 5b | R2 API token secret |
+| `S3_ENDPOINT` | Stage 5b | `https://<accountid>.r2.cloudflarestorage.com` |
 | `NODE_ENV` | Auto | `production` on Railway |
 | `PORT` | Auto | Set by Railway; start command binds to it |
 

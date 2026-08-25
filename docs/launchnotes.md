@@ -17,15 +17,15 @@ Positioning: short-film prep done really well. Features/series can still use it 
 | 3 — UX polish | **Done** | Prep pace footer, tech recce, scene panel |
 | 3b — PDF export polish | **Done** | Chunked pages, empty gates, preview loading + in-dialog errors |
 | 4 — Stripe (Solo + Pro) | **Code ~90%** | API + webhook done; **Solo checkout UI missing**; Stripe dashboard ops not live |
-| 5 — Production DB + R2 | **5a done (Turso)** | LibSQL wired; **5b R2 + drop volume** next |
+| 5 — Production DB + R2 | **5a–b done** | Turso + R2 code wired; **set R2 env on Railway**, then drop volume |
 | 6 — Go-live | **~40%** | Landing + legal stubs; feedback portal + waitlist TBD |
 | 7 — Agent tier | **Out of scope** | Waitlist only at launch |
 
 **Current focus:** Finish Stages **4–6** (build-out) before sharing with real users. Single Railway service from `main` — no parallel beta/staging split.
 
-**Priority within build-out:** Stage **5b** (R2 uploads) next — then Stripe test-mode E2E + Stage 6 polish before director access.
+**Priority within build-out:** Point Railway at R2 (`S3_*` env), smoke-test uploads across redeploy, then Stripe test-mode E2E + Stage 6 polish.
 
-**Not sharing yet** until Turso + R2 are live and core flow is smoke-tested on deploy.
+**Not sharing yet** until Turso + R2 env are live and core flow is smoke-tested on deploy.
 
 **Deploy model:** Railway app server + hosted DB + R2 object storage. SQLite volume is interim for local dev only.
 
@@ -222,10 +222,13 @@ These serve different jobs — do not conflate them:
   - Env: `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` for hosted.
   - All DB access async; `ensureDb()` runs schema/migrations on cold start.
   - `scripts/set-plan.mjs` supports Turso env or local file.
-- [ ] **Stage 5b–d:** R2 uploads, drop Railway volume, backups, deploy smoke — **blocker before director access**
-  - Drop Railway volume dependency for production (uploads still on volume until 5b).
-  - `set-plan.mjs` runs against hosted DB (`railway run node scripts/set-plan.mjs …`).
-  - Staging smoke test before director access.
+- [x] **Stage 5b:** Cloudflare R2 via `@aws-sdk/client-s3`
+  - `putUploadObject` / `getUploadObject` use R2 when `S3_BUCKET` is set; local `data/uploads` otherwise.
+  - Env: `S3_BUCKET`, `S3_REGION=auto`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`.
+  - Export + agent vision load images through the same helper.
+- [ ] **Stage 5c–d:** Drop Railway volume, backups, deploy smoke — **blocker before director access**
+  - Set `S3_*` on Railway; then unmount `/app/data` (DB is Turso, uploads are R2).
+  - Smoke: signup → import → canvas image → export → redeploy (rows + images survive).
 - [ ] **Stage 6:** Legal, feedback, waitlist, go-live
   - [x] Landing page (signed-out `/` vs dashboard split on projects 401).
   - [x] `/privacy` + `/terms` stubs (replace with full legal before public launch).
@@ -256,8 +259,8 @@ These serve different jobs — do not conflate them:
 
 1. ~~**Stage 3b** — PDF export polish~~ **Done**
 2. ~~**Stage 5a** — Turso / libSQL~~ **Done**
-3. **Stage 5b** — R2 uploads (+ drop volume) ← **next**
-4. **Stage 4** — Stripe test-mode E2E (can overlap)
+3. ~~**Stage 5b** — R2 uploads~~ **Done** (set `S3_*` on Railway, then drop volume)
+4. **Stage 4** — Stripe test-mode E2E ← **next after R2 env + smoke**
 5. **Stage 6** — feedback form, legal polish, domain
 6. **Director access**
 

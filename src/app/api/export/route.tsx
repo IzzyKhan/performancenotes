@@ -1855,8 +1855,9 @@ async function loadSceneCanvasNodes(
     .filter((n) => n.sceneId === sceneId);
 }
 
-function toExportNodes(nodes: CanvasNode[]): ExportCanvasNode[] {
-  return nodes.map((n) => {
+async function toExportNodes(nodes: CanvasNode[]): Promise<ExportCanvasNode[]> {
+  const out: ExportCanvasNode[] = [];
+  for (const n of nodes) {
     const base: ExportCanvasNode = {
       id: n.id,
       type: n.type,
@@ -1864,87 +1865,101 @@ function toExportNodes(nodes: CanvasNode[]): ExportCanvasNode[] {
     };
     switch (n.type) {
       case "text":
-        return { ...base, text: n.content.text ?? "" };
+        out.push({ ...base, text: n.content.text ?? "" });
+        break;
       case "image": {
         const fileName = n.content.filePath
           ? path.basename(n.content.filePath)
           : undefined;
         const img = n.content.filePath
-          ? readImageAsBase64(n.content.filePath)
+          ? await readImageAsBase64(n.content.filePath)
           : null;
-        return {
+        out.push({
           ...base,
           fileName,
           mimeType: n.content.mimeType,
           imageSrc: img ? `data:${img.mediaType};base64,${img.data}` : undefined,
-        };
+        });
+        break;
       }
       case "audio":
-        return {
+        out.push({
           ...base,
           fileName: n.content.filePath
             ? path.basename(n.content.filePath)
             : undefined,
           mimeType: n.content.mimeType,
-        };
+        });
+        break;
       case "video-link":
-        return { ...base, url: n.content.url ?? "" };
+        out.push({ ...base, url: n.content.url ?? "" });
+        break;
       case "mood":
-        return {
+        out.push({
           ...base,
           mood: n.content.mood ?? "",
           color: n.content.color,
-        };
+        });
+        break;
       case "shot-list": {
         const shot = normalizeShotListContent(n.content);
-        return {
+        const shotListRows = [];
+        for (const r of shot.rows) {
+          const img = r.imagePath ? await readImageAsBase64(r.imagePath) : null;
+          shotListRows.push({
+            ...r,
+            imageSrc: img
+              ? `data:${img.mediaType};base64,${img.data}`
+              : undefined,
+          });
+        }
+        out.push({
           ...base,
           shotListTitle: shot.title,
           shotListColumns: shot.columns,
-          shotListRows: shot.rows.map((r) => {
-            const img = r.imagePath ? readImageAsBase64(r.imagePath) : null;
-            return {
-              ...r,
-              imageSrc: img
-                ? `data:${img.mediaType};base64,${img.data}`
-                : undefined,
-            };
-          }),
-        };
+          shotListRows,
+        });
+        break;
       }
       case "image-grid": {
         const grid = normalizeImageGridContent(n.content);
-        return {
+        const imageGridItems = [];
+        for (const item of grid.images) {
+          const img = await readImageAsBase64(item.imagePath);
+          imageGridItems.push({
+            ...item,
+            imageSrc: img
+              ? `data:${img.mediaType};base64,${img.data}`
+              : undefined,
+          });
+        }
+        out.push({
           ...base,
           imageGridTitle: grid.title,
           imageGridColumns: grid.gridColumns,
-          imageGridItems: grid.images.map((item) => {
-            const img = readImageAsBase64(item.imagePath);
-            return {
-              ...item,
-              imageSrc: img
-                ? `data:${img.mediaType};base64,${img.data}`
-                : undefined,
-            };
-          }),
-        };
+          imageGridItems,
+        });
+        break;
       }
       case "performance-notes": {
         const perf = normalizePerformanceNotesContent(n.content);
-        return {
+        out.push({
           ...base,
           performanceNotesTitle: perf.title,
           performanceNotesBeats: perf.beats,
-        };
+        });
+        break;
       }
       case "scene-synopsis": {
         const syn = normalizeSceneSynopsisContent(n.content);
-        return { ...base, sceneSynopsis: syn.synopsis };
+        out.push({ ...base, sceneSynopsis: syn.synopsis });
+        break;
       }
       default:
-        return base;
+        out.push(base);
     }
-  });
+  }
+  return out;
 }
 
 export async function GET(request: Request) {
@@ -1999,7 +2014,7 @@ export async function GET(request: Request) {
     : null;
   const activeSceneId = scene?.id ?? sceneId;
   const canvas = includeCanvas
-    ? toExportNodes(await loadSceneCanvasNodes(projectId, activeSceneId))
+    ? await toExportNodes(await loadSceneCanvasNodes(projectId, activeSceneId))
     : [];
 
   const cheatRow = await db
@@ -2154,7 +2169,7 @@ async function exportAll(
         content: legacy.content,
         version: legacy.version,
         canvasNodes: includeCanvas
-          ? toExportNodes(await loadSceneCanvasNodes(projectId, first?.id ?? null))
+          ? await toExportNodes(await loadSceneCanvasNodes(projectId, first?.id ?? null))
           : [],
       });
     }
@@ -2170,7 +2185,7 @@ async function exportAll(
         content: sheet.content,
         version: sheet.version,
         canvasNodes: includeCanvas
-          ? toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
+          ? await toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
           : [],
       });
     }
@@ -2179,7 +2194,7 @@ async function exportAll(
     for (const scene of allScenes) {
       const sheet = allSheets.find((cs) => cs.sceneId === scene.id);
       const canvas = includeCanvas
-        ? toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
+        ? await toExportNodes(await loadSceneCanvasNodes(projectId, scene.id))
         : [];
       if (!sheet && canvas.length === 0) continue;
       const parts = headingPartsFor(scene);

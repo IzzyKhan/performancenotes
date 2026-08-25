@@ -17,3 +17,12 @@ export function isBillingCheckoutEnabled(): boolean {
     process.env.NEXT_PUBLIC_ENABLE_ORGANIZE_CHECKOUT === "true"
   );
 }
+
+/**
+ * Recruiter / portfolio demo: no sign-in. Anyone with the URL sees every
+ * project on this database and can click around (including edits).
+ * Set NEXT_PUBLIC_OPEN_ACCESS=true and redeploy. Turn off after.
+ */
+export function isOpenAccess(): boolean {
+  return process.env.NEXT_PUBLIC_OPEN_ACCESS === "true";
+}

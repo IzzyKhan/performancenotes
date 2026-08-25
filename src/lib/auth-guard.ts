@@ -3,11 +3,16 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db, ensureDb } from "@/db";
 import { projects } from "@/db/schema";
+import { isOpenAccess } from "@/lib/features";
 
 export type SessionUser = { id: string; email: string };
 
-/** When AUTH_SECRET is unset, APIs stay open (legacy local / Phase 1-only). */
+/**
+ * When AUTH_SECRET is unset, APIs stay open (legacy local / Phase 1).
+ * NEXT_PUBLIC_OPEN_ACCESS=true also skips accounts (recruiter demo).
+ */
 export function authRequired(): boolean {
+  if (isOpenAccess()) return false;
   return Boolean(process.env.AUTH_SECRET);
 }
 

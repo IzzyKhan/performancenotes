@@ -87,42 +87,26 @@ export function collectVisionImagePaths(nodes: CanvasNode[]): string[] {
   return collectImagePaths(nodes);
 }
 
-export function readImageAsBase64(filePath: string): {
+export async function readImageAsBase64(filePath: string): Promise<{
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   data: string;
-} | null {
+} | null> {
   try {
-    const candidates = [
-      path.join(UPLOADS_DIR, path.basename(filePath)),
-      path.join(
-        /* turbopackIgnore: true */ process.cwd(),
-        "data",
-        "uploads",
-        path.basename(filePath)
-      ),
-    ];
+    const { getUploadObject, guessContentType } = await import("@/lib/storage");
+    const stored = await getUploadObject(path.basename(filePath));
+    if (!stored) return null;
 
-    let found: string | null = null;
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        found = c;
-        break;
-      }
-    }
-    if (!found) return null;
-
-    const ext = path.extname(found).toLowerCase();
+    const mime = stored.contentType || guessContentType(filePath);
     const mediaType =
-      ext === ".png"
+      mime === "image/png"
         ? "image/png"
-        : ext === ".gif"
+        : mime === "image/gif"
           ? "image/gif"
-          : ext === ".webp"
+          : mime === "image/webp"
             ? "image/webp"
             : "image/jpeg";
 
-    const data = fs.readFileSync(found).toString("base64");
-    return { mediaType, data };
+    return { mediaType, data: stored.body.toString("base64") };
   } catch {
     return null;
   }

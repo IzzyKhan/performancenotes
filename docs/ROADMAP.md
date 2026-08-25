@@ -18,7 +18,7 @@ flowchart LR
 |------|--------|
 | Done | **Phase 1** — Railway + volume + Basic Auth |
 | Done | **Phase 2** — per-director accounts |
-| **Now** | **Phase 3** — Turso wired (5a); R2 + drop volume still open (5b) |
+| **Now** | **Phase 3** — Turso + R2 code done; set `S3_*` on Railway then drop volume |
 | After build-out + director feedback | **Phase 4** — public signup, Stripe live, in-app feedback, quotas |
 
 ---
@@ -60,15 +60,15 @@ flowchart LR
 
 ## Phase 3 — Durable cloud backend
 
-**Status:** Storage abstraction stubbed ([`src/lib/storage.ts`](../src/lib/storage.ts)); local volume remains default. **Blocker before director access.**
+**Status:** Turso + R2 backends wired; set `S3_*` on Railway then drop the volume. **Blocker before director access is ops, not code.**
 
 ### Checklist
 - [x] **PDF export polish** — blank pages, layout, preview UX (`src/app/api/export/route.tsx`) — see launchnotes Stage 3b
 - [x] Choose Turso; wire Drizzle via `@libsql/client` (local `file:` or `TURSO_DATABASE_URL`)
 - [x] Schema bootstrap + legacy column migrations on `ensureDb()`
 - [x] Storage helper with local default (`putUploadObject` / `getUploadObject`)
-- [ ] Implement S3/R2 backend behind `S3_BUCKET`
-- [ ] Drop Railway volume dependency
+- [x] Implement S3/R2 backend behind `S3_BUCKET` (`src/lib/storage.ts`)
+- [ ] Drop Railway volume dependency (after `S3_*` + Turso env are live)
 - [x] **Host decision:** stick with **Railway** for the Next.js app through public launch (see launchnotes Infrastructure)
 
 ### Scale note

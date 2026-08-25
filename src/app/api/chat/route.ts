@@ -292,7 +292,7 @@ export async function POST(request: Request) {
 
         const imageBlocks: Anthropic.ImageBlockParam[] = [];
         for (const filePath of collectVisionImagePaths(nodeRows).slice(0, 6)) {
-          const img = readImageAsBase64(filePath);
+          const img = await readImageAsBase64(filePath);
           if (img) {
             imageBlocks.push({
               type: "image",
